@@ -12,6 +12,8 @@
 <img alt="status" src="https://img.shields.io/badge/uso-educativo-blue">
 </p>
 
+![Página de inicio: workflow y tablero de estado](assets/screenshot-inicio.png)
+
 Tres modelos estiman la fuerza de cada selección partido a partido; el sistema
 **calibra** sus probabilidades contra resultados reales y **simula estrategias de
 apuesta** sobre Qatar 2022 para elegir la mejor y aplicarla en vivo al Mundial 2026.
