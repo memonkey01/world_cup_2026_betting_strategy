@@ -86,6 +86,10 @@ with Session(db_engine) as s:
         n_cal = len(ms)
         n_fin = sum(1 for m in ms if m.finished)
     active = load_active_strategy(s)
+    strat = ({f: getattr(active, f) for f in (
+        "label", "sizing", "side_criterion", "blend_weight", "use_bayes_filter",
+        "bayes_threshold", "start_match_no", "base_fraction", "kelly_fraction",
+        "odds", "bankroll0", "backtest_yield")} if active is not None else None)
     poly_iso = latest_scrape_iso(s, wc, "polymarket") if wc else None
     cod_iso = latest_scrape_iso(s, wc, "codere") if wc else None
 
@@ -143,18 +147,91 @@ st.page_link("pages/1_🔴_Mundial_en_vivo.py",
 st.page_link("pages/3_🗄️_Datos.py",
              label="🗄️ Datos — explorar las tablas de la base de datos")
 
-with st.expander("ℹ️ ¿Qué hace cada pieza del modelo?", expanded=False):
-    st.markdown("""
-- **Semilla FIFA → Elo.** El ranking FIFA se re-centra a la escala Elo clásica
-  (~1500 de media) para dar el rating inicial de cada selección.
-- **Elo por partido.** `R' = R + K·(S − E)`, con `S ∈ {1, 0.5, 0}` y un
-  multiplicador opcional por margen de gol. **K** controla la reactividad.
-- **Bayes (Beta-Bernoulli).** Cada equipo tiene una fuerza latente `θ ~ Beta(a,b)`
-  con prior anclado al Elo; cada partido es un ensayo (empate = 0.5) → posterior
-  conjugado con media e intervalo de credibilidad.
-- **Apuestas.** ELO elige el lado, Bayes filtra (opcional) y el *sizing*
-  (flat / confianza / Kelly) decide el stake. Se calibra contra Qatar y se fija
-  la mejor estrategia para usarla en vivo.
+# ----------------------------------------------------------------------
+# Los modelos y la estrategia, en fórmulas (Markdown + LaTeX)
+# ----------------------------------------------------------------------
+st.subheader("📐 Los modelos y la estrategia, en fórmulas")
 
-Backtest educativo, **no** consejo de apuestas.
-""")
+with st.expander("① Modelo Elo — rating por partido", expanded=False):
+    st.markdown("**Semilla FIFA → Elo.** El ranking FIFA se re-centra a la escala "
+                "Elo clásica (media ~1500):")
+    st.latex(r"R_0 = 1500 + (\text{pts}_{\text{FIFA}} - \overline{\text{pts}}) \cdot 0.9")
+    st.markdown("**Probabilidad esperada** (sigmoide logística) de que el equipo "
+                "$A$ gane al $B$:")
+    st.latex(r"E_A = \frac{1}{1 + 10^{\,(R_B - R_A)/400}}")
+    st.markdown("**Actualización** tras el partido, con score "
+                r"$S \in \{1,\ 0.5,\ 0\}$ (victoria / empate / derrota):")
+    st.latex(r"R_A' = R_A + K_{\text{eff}}\,(S_A - E_A)")
+    st.markdown("**Multiplicador por margen de gol** (amplifica $K$ en goleadas, "
+                r"corrigiendo por diferencia de rating; $=1$ si hay empate):")
+    st.latex(r"K_{\text{eff}} = K \cdot \ln\!\big(|\Delta g| + 1\big)\cdot "
+             r"\frac{2.2}{\,0.001\,|R_A - R_B| + 2.2\,}")
+
+with st.expander("② Modelo Bayes — fuerza latente (Beta-Bernoulli)", expanded=False):
+    st.markdown(r"Cada equipo tiene una fuerza latente $\theta \sim "
+                r"\mathrm{Beta}(a,b)$. **Prior anclado al Elo** (fuerza del prior "
+                r"$s$ = tamaño de muestra equivalente):")
+    st.latex(r"p = \frac{1}{1 + 10^{\,(\overline{R} - R)/400}}, \qquad "
+             r"a_0 = p\,s, \qquad b_0 = (1-p)\,s")
+    st.markdown(r"Cada partido es un ensayo Bernoulli (**empate $= 0.5$ éxito**). "
+                r"**Posterior conjugado** tras observar los resultados:")
+    st.latex(r"\theta \mid \text{datos} \sim \mathrm{Beta}\!\left(a_0 + \sum_i S_i,\ "
+             r"\; b_0 + \sum_i (1 - S_i)\right)")
+    st.markdown("**Media** e **intervalo de credibilidad** (aproximación normal, "
+                "sin scipy):")
+    st.latex(r"\hat{\theta} = \frac{a}{a+b}, \qquad "
+             r"\mathrm{Var} = \frac{a\,b}{(a+b)^2\,(a+b+1)}, \qquad "
+             r"\hat{\theta} \pm z_{0.975}\,\sqrt{\mathrm{Var}}")
+    st.markdown("**Calibración** de las probabilidades que emite el Elo "
+                "($p_i$ predicha, $o_i$ resultado):")
+    st.latex(r"\text{Brier} = \frac{1}{N}\sum_i (p_i - o_i)^2, \qquad "
+             r"\text{LogLoss} = -\frac{1}{N}\sum_i \big[o_i \ln p_i + "
+             r"(1-o_i)\ln(1-p_i)\big]")
+
+with st.expander("③ Estrategia de apuesta (la activa)", expanded=True):
+    st.markdown("Para cada partido programado: **elegir lado → filtrar → "
+                "dimensionar el stake**. Con bankroll $B$ y cuota decimal $c$:")
+    st.markdown("**1) Lado** según el criterio (Elo, Bayes o mezcla con peso $w$):")
+    st.latex(r"\text{score}_{\text{equipo}} = w\,E + (1-w)\,\hat{\theta}\quad"
+             r"\text{(Elo: } w{=}1;\ \text{Bayes: } w{=}0\text{)}")
+    st.markdown(r"**2) Filtro Bayes** (opcional): apostar solo si "
+                r"$\hat{\theta}_{\text{lado}} \ge \tau$. **Arranque:** saltar hasta "
+                r"la jornada $m_0$.")
+    st.markdown("**3) Tamaño de apuesta** (*sizing*), con $b = c - 1$ y "
+                "$p$ = prob. del lado:")
+    st.latex(r"\text{stake} = \begin{cases}"
+             r"f \cdot B & \text{(flat)}\\[4pt]"
+             r"f \cdot B \cdot \mathrm{clip}\big(2(p-0.5),\,0,\,1\big) & \text{(confianza)}\\[4pt]"
+             r"\max\!\left(0,\ \dfrac{b\,p - (1-p)}{b}\right)\cdot \lambda \cdot B & \text{(Kelly)}"
+             r"\end{cases}")
+    st.markdown("**4) Liquidación:** si gana, "
+                r"$B \mathrel{+}= \text{stake}\,(c-1)$; si no, "
+                r"$B \mathrel{-}= \text{stake}$.")
+
+    if strat is not None:
+        yld = (f"{strat['backtest_yield']*100:.1f}\\%"
+               if strat["backtest_yield"] is not None else r"\text{n/d}")
+        w = strat["blend_weight"]
+        crit = {"elo": "w = 1\\ (\\text{Elo})", "bayes": "w = 0\\ (\\text{Bayes})",
+                "blend": f"w = {w:.2f}\\ (\\text{{mezcla}})"}[strat["side_criterion"]]
+        sizing_tex = {
+            "flat": rf"f = {strat['base_fraction']:.2f}",
+            "confidence": rf"f = {strat['base_fraction']:.2f}",
+            "kelly": rf"\lambda = {strat['kelly_fraction']:.2f}",
+        }[strat["sizing"]]
+        filtro = (rf"\tau = {strat['bayes_threshold']:.2f}"
+                  if strat["use_bayes_filter"] else r"\text{sin filtro}")
+        st.markdown(f"**Estrategia activa fijada: _{strat['label']}_** "
+                    "(sus parámetros en las fórmulas de arriba):")
+        st.latex(
+            rf"\text{{sizing}}={strat['sizing']},\quad {sizing_tex},\quad {crit},"
+            rf"\quad {filtro},\quad m_0={strat['start_match_no']},"
+            rf"\quad B_0={strat['bankroll0']:.0f},\quad c={strat['odds']:.2f}")
+        st.caption(f"Yield en el backtest de Qatar: {strat['backtest_yield']*100:.1f}%"
+                   if strat["backtest_yield"] is not None else "Yield Qatar: n/d.")
+    else:
+        st.info("No hay estrategia activa fijada todavía. Ve a **🧪 Qatar 2022**, "
+                "configura el panel, corre el backtest y pulsa *Guardar "
+                "configuración actual* para fijarla.")
+
+st.caption("Backtest educativo, **no** consejo de apuestas.")
