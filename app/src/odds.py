@@ -6,6 +6,7 @@ best-effort (selectores/endpoint a validar en vivo); el parseo es puro y testeab
 from __future__ import annotations
 from dataclasses import dataclass
 import json
+import re
 
 from .scraper import normalize_team
 
@@ -61,10 +62,29 @@ def _quote(source, home, away, home_dec, away_dec, draw_dec, fetched_at) -> Odds
     )
 
 
+_VERSUS_PATTERNS = [
+    re.compile(r"^will\s+(.+?)\s+beat\s+(.+?)\??$", re.I),
+    re.compile(r"^will\s+(.+?)\s+win\s+vs\.?\s+(.+?)\??$", re.I),
+    re.compile(r"^will\s+(.+?)\s+win\s+against\s+(.+?)\??$", re.I),
+    re.compile(r"^(.+?)\s+vs\.?\s+(.+?)\??$", re.I),
+]
+
+
+def _parse_versus(question: str) -> tuple[str, str] | None:
+    """Extrae (equipo, rival) de la pregunta de un mercado Yes/No. None si no aplica."""
+    q = (question or "").strip()
+    for pat in _VERSUS_PATTERNS:
+        m = pat.match(q)
+        if m:
+            return m.group(1).strip(), m.group(2).strip()
+    return None
+
+
 def parse_polymarket(payload: list, fetched_at: str) -> list[OddsQuote]:
-    """payload: lista de mercados Gamma. Cada uno con 'outcomes' (JSON de 2 equipos)
-    y 'outcomePrices' (JSON de 2 precios). El primer outcome = home."""
+    """Soporta (1) mercados de 2 outcomes = equipos, y (2) mercados Yes/No
+    'Will X beat Y' que se emparejan por partido (clave frozenset{equipos})."""
     out: list[OddsQuote] = []
+    pending: dict[frozenset, tuple[str, float]] = {}  # par -> (equipo, P(Yes))
     for mkt in payload:
         try:
             outcomes = json.loads(mkt["outcomes"])
@@ -73,10 +93,27 @@ def parse_polymarket(payload: list, fetched_at: str) -> list[OddsQuote]:
             continue
         if len(outcomes) != 2 or len(prices) != 2:
             continue
-        home, away = normalize_es(outcomes[0]), normalize_es(outcomes[1])
-        out.append(_quote("polymarket", home, away,
-                          price_to_decimal(prices[0]), price_to_decimal(prices[1]),
-                          None, fetched_at))
+        labels = [str(o).strip().lower() for o in outcomes]
+        if set(labels) == {"yes", "no"}:
+            vs = _parse_versus(mkt.get("question", ""))
+            if not vs:
+                continue
+            team, opp = normalize_es(vs[0]), normalize_es(vs[1])
+            p_yes = prices[labels.index("yes")]
+            key = frozenset((team, opp))
+            if key in pending:
+                home, p_home = pending.pop(key)
+                away = opp if home == team else team
+                out.append(_quote("polymarket", home, away,
+                                  price_to_decimal(p_home), price_to_decimal(p_yes),
+                                  None, fetched_at))
+            else:
+                pending[key] = (team, p_yes)
+        else:
+            home, away = normalize_es(outcomes[0]), normalize_es(outcomes[1])
+            out.append(_quote("polymarket", home, away,
+                              price_to_decimal(prices[0]), price_to_decimal(prices[1]),
+                              None, fetched_at))
     return out
 
 
