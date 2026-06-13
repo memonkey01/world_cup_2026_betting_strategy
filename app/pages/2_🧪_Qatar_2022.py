@@ -24,7 +24,7 @@ from src.ingest import (ingest_qatar_backtest, load_matches, clear_snapshots,
                         persist_snapshots)
 from src.betting import BetParams, simulate, sweep_strategies
 from src.strategies import save_active_strategy, load_active_strategy
-from ui_common import model_controls, betting_controls, fifa_ranking
+from ui_common import model_controls, fifa_ranking
 
 st.set_page_config(page_title="Qatar 2022 — Laboratorio", layout="wide")
 st.title("🧪 Qatar 2022 — laboratorio de estrategias")
@@ -34,21 +34,24 @@ st.caption("Configura a la izquierda, mira el modelo, corre el backtest y fija l
 
 with st.expander("ℹ️ ¿Cómo se usa este laboratorio? (paso a paso)", expanded=False):
     st.markdown("""
-1. **Paso 1 — Modelo** (barra lateral): ajusta **K**, la fuerza del prior Bayes y
-   el multiplicador por margen. Define cómo aprende el modelo.
-2. **Paso 2 — Apuesta** (barra lateral): fija **bankroll**, cuota, **criterio de
-   lado** (Elo/Bayes/mezcla), umbral de Bayes, jornada de arranque, **sizing**
-   (flat/confianza/Kelly) y si filtras por Bayes. Esta es tu *meta-estrategia*.
-3. **Monitor del modelo** (abajo): cómo evolucionan Elo y la fuerza latente Bayes
-   sobre Qatar 2022, y qué tan calibradas quedan las probabilidades (Brier/LogLoss).
-4. **Backtest de apuestas**: simula tu configuración partido a partido y muestra
-   ROI, yield, % de acierto, drawdown y la curva de bankroll.
-5. **Fijar**: «Guardar configuración actual» persiste **estos** parámetros como la
-   estrategia activa. «Mundial en vivo» recomendará 2026 con ella.
+La barra lateral está agrupada y **muestra cada sub-parámetro solo cuando aplica**
+(pasa el cursor por la **(?)** de cada control para ver qué hace):
+
+1. **Modelo** — *cómo aprende*: **K**, fuerza del prior Bayes y multiplicador por
+   margen de gol.
+2. **Apuesta** — bankroll, cuota fija y desde qué **jornada** se empieza (default 2:
+   un partido de calentamiento por equipo).
+3. **Tamaño de apuesta (sizing)** — Flat/Confianza/Kelly. Si eliges **Kelly** aparece
+   *Fracción de Kelly*; si eliges **Flat/Confianza** aparece *Fracción base*.
+4. **Selección de lado** — Elo / Bayes / Mezcla. Solo en **Mezcla** aparece el *peso*.
+5. **Filtro de calidad (Bayes)** — al activarlo aparece el *umbral*.
+
+Luego, abajo: **Monitor del modelo** (Elo/Bayes/calibración), **Backtest** con esas
+variables (ROI, yield, acierto, drawdown, curva) y **Fijar** («Guardar configuración
+actual» persiste estos params como estrategia activa; «Mundial en vivo» la usa).
 
 ¿No sabes qué combinación conviene? Abre **🔬 Explorar combinaciones**: barre las
-18 variantes, elige una y «Aplicar al panel» la copia a la izquierda para que la
-revises y la fijes.
+18 variantes, elige una y «Aplicar al panel» la copia a la izquierda para revisarla.
 """)
 
 
@@ -62,22 +65,92 @@ def get_db():
 db_engine = get_db()
 
 # ----------------------------------------------------------------------
-# Sidebar: Paso 1 (modelo) + Paso 2 (apuesta) -> UN solo BetParams (params)
+# Sidebar agrupado: MODELO · APUESTA · SIZING · LADO · FILTRO.
+# Los sub-parámetros ligados (fracción de Kelly, peso de la mezcla, umbral…)
+# solo aparecen cuando aplican, y se construye UN solo BetParams (params).
+# Las keys coinciden con las de «Mundial en vivo» (ui_common) para concordancia.
 # ----------------------------------------------------------------------
+st.sidebar.caption("Configura aquí; abajo verás el modelo, el backtest con estas "
+                   "variables y podrás fijar la estrategia para usarla en vivo.")
+
+# --- MODELO (cómo aprende) ---
 k_factor, prior_strength, use_margin = model_controls()
 fifa_points = fifa_ranking()
-common = betting_controls()
 
-st.sidebar.header("Estrategia (sizing y filtro)")
+# --- APUESTA (bankroll, cuota, arranque — siempre aplican) ---
+st.sidebar.header("Apuesta")
+bankroll0 = st.sidebar.number_input(
+    "Bankroll inicial", 100.0, 1_000_000.0, 1000.0, 100.0, key="bankroll0",
+    help="Capital con el que arranca el backtest. La curva de bankroll parte de aquí.")
+odds = st.sidebar.number_input(
+    "Cuota decimal fija", 1.01, 10.0, 2.0, 0.05, key="odds",
+    help="Pago si ganas (2.0 = pago par: ganas lo mismo que apuestas). En el "
+         "backtest es fija porque no hay cuotas reales de Qatar 2022.")
+start_match_no = st.sidebar.slider(
+    "Apostar desde la jornada", 1, 5, 2, key="start_match_no",
+    help="No se apuesta antes de esta jornada: deja un partido de calentamiento "
+         "por equipo para que el modelo se calibre. **Default 2** (recomendado).")
+
+# --- SIZING (cuánto apostar) + su parámetro ligado ---
+st.sidebar.header("Tamaño de apuesta (sizing)")
 sizing = st.sidebar.selectbox(
-    "Bet sizing", ["flat", "confidence", "kelly"],
+    "Método", ["flat", "confidence", "kelly"],
     format_func={"flat": "Flat (% fijo)",
                  "confidence": "Proporcional a confianza",
                  "kelly": "Kelly fraccional"}.get,
-    key="sim_sizing")
-use_filter = st.sidebar.checkbox("Filtrar por umbral de Bayes", value=False,
-                                 key="sim_filter")
+    key="sim_sizing",
+    help="Cómo se decide el stake: Flat = % fijo · Confianza = escala con qué "
+         "tan arriba de 50% está la prob. · Kelly = óptimo según ventaja y cuota.")
+if sizing == "kelly":
+    kelly_fraction = st.sidebar.slider(
+        "Fracción de Kelly", 0.05, 1.0, 0.25, 0.05, key="kelly_fraction",
+        help="Qué fracción del Kelly óptimo se apuesta (1.0 = Kelly completo, "
+             "muy agresivo; 0.25 = conservador). Solo aplica al sizing Kelly.")
+    base_fraction = float(st.session_state.get("base_fraction", 0.05))
+else:
+    base_fraction = st.sidebar.slider(
+        "Fracción base del bankroll", 0.01, 0.50, 0.05, 0.01, key="base_fraction",
+        help="% del bankroll por apuesta. En «Confianza» se escala según la "
+             "probabilidad del lado. Solo aplica a Flat/Confianza.")
+    kelly_fraction = float(st.session_state.get("kelly_fraction", 0.25))
 
+# --- LADO (a quién apostar) + su parámetro ligado ---
+st.sidebar.header("Selección de lado")
+side_criterion = st.sidebar.selectbox(
+    "Criterio", ["elo", "bayes", "blend"],
+    format_func={"elo": "Elo (favorito)", "bayes": "Mayor media Bayes",
+                 "blend": "Mezcla Elo/Bayes"}.get,
+    key="side_criterion",
+    help="A qué equipo se le apuesta: el favorito por Elo, el de mayor fuerza "
+         "latente Bayes, o una mezcla ponderada de ambos.")
+if side_criterion == "blend":
+    blend_weight = st.sidebar.slider(
+        "Peso de Elo en la mezcla", 0.0, 1.0, 0.5, 0.05, key="blend_weight",
+        help="1.0 = solo Elo · 0.0 = solo Bayes. Solo aplica al criterio «Mezcla».")
+else:
+    blend_weight = float(st.session_state.get("blend_weight", 0.5))
+
+# --- FILTRO de calidad (Bayes) + su umbral ligado ---
+st.sidebar.header("Filtro de calidad (Bayes)")
+use_filter = st.sidebar.checkbox(
+    "Apostar solo si la fuerza Bayes supera un umbral", value=False,
+    key="sim_filter",
+    help="Si está activo, descarta los partidos donde el lado elegido no llega "
+         "al umbral de fuerza latente: apuesta solo a los «seguros».")
+if use_filter:
+    bayes_threshold = st.sidebar.slider(
+        "Umbral de Bayes", 0.30, 0.80, 0.50, 0.01, key="bayes_threshold",
+        help="Media Bayes mínima del lado elegido para apostar.")
+else:
+    bayes_threshold = float(st.session_state.get("bayes_threshold", 0.5))
+
+# Un solo dict «common» (sin sizing/filtro) + el BetParams completo.
+common = dict(bankroll0=float(bankroll0), odds=float(odds),
+              start_match_no=int(start_match_no),
+              base_fraction=float(base_fraction),
+              kelly_fraction=float(kelly_fraction),
+              side_criterion=side_criterion, blend_weight=float(blend_weight),
+              bayes_threshold=float(bayes_threshold))
 params = BetParams(sizing=sizing, use_bayes_filter=use_filter, **common)
 
 # ----------------------------------------------------------------------

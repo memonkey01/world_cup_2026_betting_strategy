@@ -10,11 +10,19 @@ import streamlit as st
 def model_controls() -> tuple[float, float, bool]:
     """Sidebar 'Modelo': K, fuerza del prior Bayes, multiplicador por margen."""
     st.sidebar.header("Modelo")
-    k = st.sidebar.slider("Factor K (Elo)", 10, 80, 40, 5, key="k_factor")
-    prior = st.sidebar.slider("Fuerza del prior Bayes", 1.0, 12.0, 4.0, 1.0,
-                              key="prior_strength")
-    margin = st.sidebar.checkbox("Multiplicador por margen de gol", value=True,
-                                 key="use_margin")
+    k = st.sidebar.slider(
+        "Factor K (Elo)", 10, 80, 40, 5, key="k_factor",
+        help="Reactividad del Elo: K alto = el rating salta mucho tras cada "
+             "partido; K bajo = cambios suaves. 40 es un valor típico.")
+    prior = st.sidebar.slider(
+        "Fuerza del prior Bayes", 1.0, 12.0, 4.0, 1.0, key="prior_strength",
+        help="Cuánto pesa el Elo inicial en la fuerza latente Bayes antes de ver "
+             "partidos. Alto = el modelo confía más en la semilla FIFA al arrancar.")
+    margin = st.sidebar.checkbox(
+        "Multiplicador por margen de gol", value=True, key="use_margin",
+        help="Amplifica K según la diferencia de goles: un 3-0 mueve más el Elo "
+             "que un 1-0. Apágalo para que toda victoria pese igual, sin importar "
+             "el marcador.")
     return float(k), float(prior), bool(margin)
 
 
