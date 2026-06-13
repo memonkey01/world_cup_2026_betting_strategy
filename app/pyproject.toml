@@ -8,6 +8,7 @@ dependencies = [
     "pandas>=2.0",
     "playwright>=1.45",
     "sqlmodel>=0.0.22",
+    "trueskill>=0.4.5",
 ]
 
 [dependency-groups]

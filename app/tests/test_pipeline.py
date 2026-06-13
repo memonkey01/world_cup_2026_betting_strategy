@@ -91,6 +91,22 @@ def test_prematch_rec_uses_current_state():
     assert rec2["home_match_no"] == 1
 
 
+def test_pipeline_tracks_trueskill():
+    p = Pipeline()
+    p.seed(FIFA_SNAPSHOT_EXAMPLE)
+    p.process_all(QATAR_2022_SAMPLE)
+    # match_log expone la prob TrueSkill pre-partido (suma a 1 con el rival)
+    first = p.match_log[0]
+    assert 0.0 < first["ts_home"] < 1.0
+    assert abs(first["ts_home"] + first["ts_away"] - 1.0) < 1e-9
+    # prematch_rec también
+    rec = p.prematch_rec("Argentina", "France")
+    assert 0.0 < rec["ts_home"] < 1.0
+    # el leaderboard combinado trae μ y σ de TrueSkill
+    lb = p.combined_leaderboard()
+    assert "ts_mu" in lb[0] and "ts_sigma" in lb[0]
+
+
 def test_team_evolution_per_team_match_index():
     p = Pipeline()
     p.seed(FIFA_SNAPSHOT_EXAMPLE)

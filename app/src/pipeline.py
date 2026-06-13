@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 
 from .elo import EloSystem, expected_score, match_scores
 from .bayes import BayesianLeague, brier_score, log_loss, reliability_bins
+from .trueskill_model import TrueSkillSystem
 from .fifa_seed import fifa_to_elo
 
 
@@ -22,6 +23,7 @@ STAGE_ORDER = ["group", "R16", "QF", "SF", "3rd", "final"]
 class Pipeline:
     elo: EloSystem = field(default_factory=lambda: EloSystem(k=40.0))
     bayes: BayesianLeague = field(default_factory=BayesianLeague)
+    trueskill: TrueSkillSystem = field(default_factory=TrueSkillSystem)
     pred_probs: list[float] = field(default_factory=list)   # prob A gana (pre-match)
     pred_outcomes: list[float] = field(default_factory=list)  # score real de A
     snapshots: list[dict] = field(default_factory=list)
@@ -33,6 +35,7 @@ class Pipeline:
         self.initial_elo = fifa_to_elo(fifa_points)
         self.elo.seed(self.initial_elo)
         self.bayes.seed_from_elo(self.initial_elo)
+        self.trueskill.seed_from_elo(self.initial_elo)
 
     def process_match(self, home: str, away: str, hg: int, ag: int,
                       stage: str = "group", date: str | None = None) -> dict:
@@ -41,23 +44,27 @@ class Pipeline:
         s_home, _ = match_scores(hg, ag)
         self.pred_probs.append(p_home)
         self.pred_outcomes.append(s_home)
-        # foto Bayes pre-partido y numero de aparicion por equipo
+        # foto Bayes + TrueSkill pre-partido y numero de aparicion por equipo
         bayes_home = self.bayes.get(home).mean
         bayes_away = self.bayes.get(away).mean
+        ts_home = self.trueskill.win_probability(home, away)
+        ts_away = 1.0 - ts_home
         self._appearances[home] = self._appearances.get(home, 0) + 1
         self._appearances[away] = self._appearances.get(away, 0) + 1
         self.match_log.append({
             "date": date, "stage": stage, "home": home, "away": away,
             "p_home": p_home,
             "bayes_home": bayes_home, "bayes_away": bayes_away,
+            "ts_home": ts_home, "ts_away": ts_away,
             "home_goals": hg, "away_goals": ag,
             "home_win": hg > ag, "away_win": ag > hg,
             "home_match_no": self._appearances[home],
             "away_match_no": self._appearances[away],
         })
-        # 2) actualizar ambos sistemas
+        # 2) actualizar los tres sistemas
         rec = self.elo.update_match(home, away, hg, ag, stage=stage, match_date=date)
         self.bayes.update_match(home, away, hg, ag)
+        self.trueskill.update_match(home, away, hg, ag, stage=stage, match_date=date)
         rec["pred_home_win"] = p_home
         return rec
 
@@ -109,11 +116,13 @@ class Pipeline:
     def prematch_rec(self, home: str, away: str) -> dict:
         """Foto pre-partido para un juego hipotético con el estado ACTUAL,
         sin actualizar Elo/Bayes. Mismo formato que match_log (sin resultado)."""
+        ts_home = self.trueskill.win_probability(home, away)
         return {
             "home": home, "away": away,
             "p_home": expected_score(self.elo.get(home), self.elo.get(away)),
             "bayes_home": self.bayes.get(home).mean,
             "bayes_away": self.bayes.get(away).mean,
+            "ts_home": ts_home, "ts_away": 1.0 - ts_home,
             "home_match_no": self._appearances.get(home, 0) + 1,
             "away_match_no": self._appearances.get(away, 0) + 1,
         }
@@ -124,6 +133,7 @@ class Pipeline:
         for team in self.elo.ratings:
             b = self.bayes.get(team)
             lo, hi = b.credible_interval()
+            ts = self.trueskill.get(team)
             rows.append({
                 "team": team,
                 "elo": round(self.elo.get(team), 1),
@@ -132,5 +142,7 @@ class Pipeline:
                 "bayes_mean": round(b.mean, 3),
                 "bayes_lo": round(lo, 3),
                 "bayes_hi": round(hi, 3),
+                "ts_mu": round(ts.mu, 2),
+                "ts_sigma": round(ts.sigma, 2),
             })
         return sorted(rows, key=lambda r: r["elo"], reverse=True)

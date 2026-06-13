@@ -35,6 +35,14 @@ def test_pick_side_blend_respects_weight():
     assert pick_side(r, "blend", 0.0)[0] == "away"
 
 
+def test_pick_side_trueskill_uses_ts_prob():
+    r = rec(p_home=0.40, bayes_home=0.5, bayes_away=0.5)
+    r["ts_home"], r["ts_away"] = 0.70, 0.30   # TrueSkill favorece al local
+    side, p_pick, _, _ = pick_side(r, "trueskill", 0.5)
+    assert side == "home"                       # elige por TrueSkill, no por Elo
+    assert abs(p_pick - 0.70) < 1e-9            # p_pick = prob TrueSkill del lado
+
+
 def test_stake_flat():
     p = BetParams(sizing="flat", base_fraction=0.05)
     assert abs(stake_amount(p, 1000.0, 0.7) - 50.0) < 1e-9
@@ -183,8 +191,8 @@ def test_sweep_strategies_ranks_by_yield():
                      kelly_fraction=0.25, start_match_no=2,
                      blend_weight=0.5, bayes_threshold=0.5)
     rows = sweep_strategies(log, base)
-    # 3 sizing x 3 criterio x 2 filtro = 18 combinaciones
-    assert len(rows) == 18
+    # 3 sizing x 4 criterio x 2 filtro = 24 combinaciones
+    assert len(rows) == 24
     # ordenadas por yield desc
     ys = [r["metrics"]["yield"] for r in rows]
     assert ys == sorted(ys, reverse=True)
@@ -192,6 +200,6 @@ def test_sweep_strategies_ranks_by_yield():
     top = rows[0]
     assert isinstance(top["params"], BetParams)
     assert top["sizing"] in ("flat", "confidence", "kelly")
-    assert top["side_criterion"] in ("elo", "bayes", "blend")
+    assert top["side_criterion"] in ("elo", "bayes", "blend", "trueskill")
     assert top["use_bayes_filter"] in (True, False)
     assert "curve" not in top["metrics"]  # métricas livianas (sin curva/apuestas)

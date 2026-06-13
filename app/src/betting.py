@@ -33,9 +33,14 @@ def pick_side(rec: dict, side_criterion: str, blend_weight: float
     p_home = rec["p_home"]
     elo_home, elo_away = p_home, 1.0 - p_home
     bayes_home, bayes_away = rec["bayes_home"], rec["bayes_away"]
+    # TrueSkill (si el rec no lo trae, cae a la prob de Elo).
+    ts_home = rec.get("ts_home", elo_home)
+    ts_away = rec.get("ts_away", elo_away)
 
     if side_criterion == "bayes":
         home_score, away_score = bayes_home, bayes_away
+    elif side_criterion == "trueskill":
+        home_score, away_score = ts_home, ts_away
     elif side_criterion == "blend":
         w = blend_weight
         home_score = w * elo_home + (1 - w) * bayes_home
@@ -43,9 +48,13 @@ def pick_side(rec: dict, side_criterion: str, blend_weight: float
     else:  # 'elo'
         home_score, away_score = elo_home, elo_away
 
+    # p_pick (para el sizing/Kelly): TrueSkill usa su propia prob de victoria;
+    # los demás criterios usan la de Elo (comportamiento previo intacto).
+    ph = ts_home if side_criterion == "trueskill" else elo_home
+    pa = ts_away if side_criterion == "trueskill" else elo_away
     if home_score >= away_score:
-        return "home", elo_home, bayes_home, rec["home_match_no"]
-    return "away", elo_away, bayes_away, rec["away_match_no"]
+        return "home", ph, bayes_home, rec["home_match_no"]
+    return "away", pa, bayes_away, rec["away_match_no"]
 
 
 def stake_amount(params: BetParams, bankroll: float, p_pick: float) -> float:
@@ -147,12 +156,12 @@ def recommend_bet(rec: dict, bankroll: float, params: BetParams,
 
 
 SWEEP_SIZINGS = ("flat", "confidence", "kelly")
-SWEEP_CRITERIA = ("elo", "bayes", "blend")
+SWEEP_CRITERIA = ("elo", "bayes", "blend", "trueskill")
 SWEEP_FILTERS = (False, True)
 
 
 def sweep_strategies(match_log: list[dict], base: BetParams) -> list[dict]:
-    """Barre sizing x side_criterion x use_bayes_filter (18 combos) manteniendo
+    """Barre sizing x side_criterion x use_bayes_filter (24 combos) manteniendo
     el resto de `base` fijo. Devuelve filas {sizing, side_criterion,
     use_bayes_filter, params, metrics} ordenadas por yield desc (luego roi desc)."""
     rows = []
