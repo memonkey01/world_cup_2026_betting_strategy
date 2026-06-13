@@ -17,26 +17,60 @@ Playwright y monitor en Streamlit que se actualiza al cerrar cada jornada.
    *antes* de cada partido) se contrastan contra resultados con Brier, LogLoss
    y curva de fiabilidad. `src/bayes.py` + `src/pipeline.py`.
 
-## Uso
+## Requisitos
+
+- **Python 3.11+**
+- **[uv](https://docs.astral.sh/uv/)** (gestor de entorno y dependencias). Instalar:
+  - macOS / Linux: `curl -LsSf https://astral.sh/uv/install.sh | sh`
+  - Windows (PowerShell): `powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"`
+
+`uv` instala el resto (streamlit, pandas, playwright, sqlmodel) por ti. No hace
+falta crear el venv a mano.
+
+## Cómo correrlo
+
+Todos los comandos se ejecutan **desde la carpeta `app/`**.
 
 ```bash
 cd app
-uv sync
-uv run playwright install chromium     # solo para modo "En vivo 2026"
-uv run streamlit run app.py
-uv run pytest -q                        # tests (sin red)
+uv sync                          # 1. crea .venv/ e instala dependencias
+uv run streamlit run app.py      # 2. abre el monitor en el navegador
 ```
 
+Streamlit imprime una URL local (por defecto http://localhost:8501) y la abre
+sola. Elige el modo en la barra lateral:
+
+- **Backtest Qatar 2022** (recomendado para empezar, *no necesita red*): al primer
+  arranque siembra la base de datos con resultados reales y muestra tabla, KPIs,
+  evolución de Elo y calibración.
+- **En vivo 2026** (necesita red y el navegador de Playwright): instala una sola
+  vez el navegador y luego scrapea ESPN:
+
+  ```bash
+  uv run playwright install chromium    # solo una vez, solo para "En vivo 2026"
+  ```
+
+  Pon el rango de fechas, pulsa «Actualizar jornada», y persiste los partidos
+  finalizados en la DB.
+
+### Tests
+
+```bash
+uv run pytest -q                 # 18 tests, sin red
+```
+
+### Base de datos
+
 La base de datos SQLite (`app/data/worldcup.db`) es la **fuente de verdad**: el
-scraper la llena con partidos y el pipeline Elo/Bayes lee de ella.
+scraper la llena con partidos y el pipeline Elo/Bayes lee de ella. Se crea sola
+en el primer arranque y está en `.gitignore`. Para empezar de cero, basta con
+borrarla:
 
-- **Backtest Qatar 2022:** al primer arranque siembra la DB (con el fixture
-  `src/qatar_fixture.py`, offline) y en adelante lee de ella.
-- **En vivo 2026:** scrapea `fifa.world` de ESPN por rango de fechas, persiste los
-  partidos finalizados en la DB y recarga. Pulsa «Actualizar jornada» al cerrar
-  cada fecha.
+```bash
+rm app/data/worldcup.db          # Windows PowerShell: Remove-Item app/data/worldcup.db
+```
 
-Endpoint ESPN (sin API key):
+Endpoint ESPN que usa el scraper (sin API key):
 `https://site.api.espn.com/apis/site/v2/sports/soccer/fifa.world/scoreboard?dates=YYYYMMDD-YYYYMMDD`
 
 ## Resultado del backtest (Qatar 2022, K=40)
