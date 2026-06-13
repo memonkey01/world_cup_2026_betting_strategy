@@ -75,3 +75,18 @@ class Strategy(SQLModel, table=True):
     # métricas logradas en el backtest
     backtest_yield: float | None = None
     backtest_roi: float | None = None
+
+
+class Odds(SQLModel, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+    tournament_id: int = Field(foreign_key="tournament.id", index=True)
+    home_team_id: int = Field(foreign_key="team.id")
+    away_team_id: int = Field(foreign_key="team.id")
+    date: str | None = None
+    source: str = Field(index=True)         # 'codere' | 'polymarket'
+    home_decimal: float
+    away_decimal: float
+    draw_decimal: float | None = None
+    home_prob: float
+    away_prob: float
+    fetched_at: str                          # ISO
