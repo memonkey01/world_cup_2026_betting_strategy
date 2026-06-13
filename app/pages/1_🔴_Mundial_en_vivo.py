@@ -57,6 +57,9 @@ use_filter = st.sidebar.checkbox("Filtrar por umbral de Bayes", value=False,
 st.sidebar.caption(f"Sizing activo: **{sizing}**")
 st.sidebar.caption("⚠️ Si hay una **estrategia activa** fijada en el Simulador, "
                    "ésta tiene prioridad y estos botones se ignoran.")
+override_active = st.sidebar.checkbox(
+    "Ignorar estrategia activa (override manual)", value=False,
+    key="live_override")
 
 st.sidebar.header("Cuotas")
 odds_source = st.sidebar.selectbox("Fuente de cuotas (en vivo)",
@@ -112,20 +115,24 @@ pipe.seed(FIFA_SNAPSHOT_EXAMPLE)
 pipe.bayes.seed_from_elo(pipe.initial_elo, strength=prior_strength)
 pipe.process_all(finished)
 
-# Estrategia activa de la DB (fijada en el laboratorio) tiene prioridad.
+# Estrategia activa de la DB (salvo override manual).
 with Session(db_engine) as s:
     active = load_active_strategy(s)
-if active is not None:
+if active is not None and not override_active:
     params = strategy_to_params(active)
     yld = f"{active.backtest_yield*100:.1f}%" if active.backtest_yield is not None else "n/d"
     st.success(f"📌 Estrategia activa: **{active.label}** "
                f"(sizing {active.sizing} · criterio {active.side_criterion} · "
                f"filtro {'sí' if active.use_bayes_filter else 'no'} · yield Qatar {yld}). "
-               "Cámbiala en la página «Simulador».")
+               "Marca «Ignorar estrategia activa» para usar los controles de la izquierda.")
 else:
     params = BetParams(sizing=sizing, use_bayes_filter=use_filter, **common)
-    st.info("No hay estrategia activa fijada. Usando los controles de la barra "
-            "lateral. Ve al «Simulador» para barrer y fijar la mejor.")
+    if active is not None:
+        st.info("Override manual activo: usando sizing/criterio de la barra lateral "
+                "(ignorando la estrategia activa).")
+    else:
+        st.info("No hay estrategia activa fijada. Usando los controles de la barra "
+                "lateral. Ve al «Simulador» para barrer y fijar la mejor.")
 
 # 4) KPIs rápidos
 c1, c2, c3 = st.columns(3)
