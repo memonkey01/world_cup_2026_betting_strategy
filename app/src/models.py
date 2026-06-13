@@ -55,3 +55,23 @@ class RatingSnapshot(SQLModel, table=True):
     bayes_mean: float
     bayes_lo: float | None = None   # solo se rellena en el paso final
     bayes_hi: float | None = None
+
+
+class Strategy(SQLModel, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+    label: str
+    active: bool = False
+    # campos de BetParams
+    bankroll0: float
+    odds: float
+    sizing: str
+    base_fraction: float
+    kelly_fraction: float
+    start_match_no: int
+    side_criterion: str
+    blend_weight: float
+    use_bayes_filter: bool
+    bayes_threshold: float
+    # métricas logradas en el backtest
+    backtest_yield: float | None = None
+    backtest_roi: float | None = None
