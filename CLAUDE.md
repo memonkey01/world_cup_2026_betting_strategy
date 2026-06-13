@@ -37,8 +37,13 @@ partidos y el pipeline Elo/Bayes lee de ella.
 | [app/src/models.py](app/src/models.py) | Modelos SQLModel: `Team`, `Tournament`, `Match`, `RatingSnapshot` |
 | [app/src/db.py](app/src/db.py) | Engine SQLite, `init_db`, sesiones (`:memory:` para tests) |
 | [app/src/ingest.py](app/src/ingest.py) | Pegamento scraper ↔ DB ↔ pipeline: `seed_teams`, `ingest_qatar_backtest`, `ingest_live`, `load_matches`, `persist_snapshots` |
+| [app/src/betting.py](app/src/betting.py) | Motor puro de backtest de apuestas: `BetParams`, `pick_side`, `stake_amount`, `simulate` |
 | [app/app.py](app/app.py) | Dashboard Streamlit (lee/escribe vía DB) |
-| [app/tests/](app/tests/) | `test_pipeline.py`, `test_models.py`, `test_ingest.py` |
+| [app/pages/](app/pages/) | Páginas Streamlit extra (multipage): simulador de apuestas |
+| [app/tests/](app/tests/) | `test_pipeline.py`, `test_models.py`, `test_ingest.py`, `test_betting.py` |
+
+El simulador de apuestas consume `Pipeline.match_log` (foto pre-partido: prob
+Elo, medias Bayes y nº de partido por equipo) vía el motor puro `src/betting.py`.
 
 Flujo: `Pipeline.seed(fifa_points)` → `process_all(matches)` donde cada `match`
 es la tupla `(date, stage, home, away, home_goals, away_goals)`. Elo y Bayes se

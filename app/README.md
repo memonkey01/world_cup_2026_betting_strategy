@@ -95,11 +95,24 @@ src/bayes.py          # Beta-Bernoulli + métricas de calibración
 src/fifa_seed.py      # FIFA → Elo inicial
 src/scraper.py        # ESPN vía Playwright / requests + normalización de nombres/fases
 src/qatar_fixture.py  # resultados reales Qatar 2022 (offline / fallback)
-src/pipeline.py       # orquestador Elo+Bayes + snapshots por jornada
+src/pipeline.py       # orquestador Elo+Bayes + snapshots + match_log pre-partido
 src/models.py         # modelos SQLModel: Team, Tournament, Match, RatingSnapshot
 src/db.py             # engine SQLite, init_db, sesiones
 src/ingest.py         # pegamento scraper ↔ DB ↔ pipeline (DB = fuente de verdad)
+src/betting.py        # motor puro de backtest de apuestas (BetParams, simulate)
 app.py                # monitor Streamlit (lee/escribe vía DB)
+pages/2_💰_Simulador_Apuestas.py  # página Streamlit del simulador (multipage)
 data/worldcup.db      # SQLite (runtime, gitignored)
-tests/                # test_pipeline.py, test_models.py, test_ingest.py
+tests/                # test_pipeline.py, test_models.py, test_ingest.py, test_betting.py
 ```
+
+## Simulador de apuestas
+
+Al correr `uv run streamlit run app.py`, la barra lateral muestra una segunda
+página, **💰 Simulador de apuestas**: backtest al ganador sobre Qatar 2022 con
+bet sizing dinámico (flat / proporcional a confianza / Kelly fraccional),
+arranque configurable de jornada, y una meta-estrategia con criterio de lado
+configurable (Elo / Bayes / mezcla). Compara dos estrategias —apostar a todos vs.
+solo cuando la media Bayes supera un umbral— con KPIs (ROI, yield, drawdown) y
+curvas de bankroll. Es un backtest educativo con cuotas sintéticas fijas, no
+consejo de apuestas.
