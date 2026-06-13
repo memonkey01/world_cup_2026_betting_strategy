@@ -76,6 +76,21 @@ def test_match_log_prematch_snapshot():
     assert nos == [1, 2, 3, 4, 5, 6]
 
 
+def test_prematch_rec_uses_current_state():
+    p = Pipeline()
+    p.seed(FIFA_SNAPSHOT_EXAMPLE)
+    p.process_all(QATAR_2022_SAMPLE)
+    # Argentina jugó 6 -> su próximo sería el nº 7
+    rec = p.prematch_rec("Argentina", "France")
+    assert rec["home"] == "Argentina" and rec["away"] == "France"
+    assert 0.0 < rec["p_home"] < 1.0
+    assert 0.0 <= rec["bayes_home"] <= 1.0 and 0.0 <= rec["bayes_away"] <= 1.0
+    assert rec["home_match_no"] == 7
+    # equipo que no jugó -> match_no 1
+    rec2 = p.prematch_rec("Atlantis", "France")
+    assert rec2["home_match_no"] == 1
+
+
 def test_team_evolution_per_team_match_index():
     p = Pipeline()
     p.seed(FIFA_SNAPSHOT_EXAMPLE)

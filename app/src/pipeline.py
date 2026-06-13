@@ -106,6 +106,18 @@ class Pipeline:
                 })
         return rows
 
+    def prematch_rec(self, home: str, away: str) -> dict:
+        """Foto pre-partido para un juego hipotético con el estado ACTUAL,
+        sin actualizar Elo/Bayes. Mismo formato que match_log (sin resultado)."""
+        return {
+            "home": home, "away": away,
+            "p_home": expected_score(self.elo.get(home), self.elo.get(away)),
+            "bayes_home": self.bayes.get(home).mean,
+            "bayes_away": self.bayes.get(away).mean,
+            "home_match_no": self._appearances.get(home, 0) + 1,
+            "away_match_no": self._appearances.get(away, 0) + 1,
+        }
+
     def combined_leaderboard(self) -> list[dict]:
         """Tabla unificada: Elo + media bayesiana + intervalo de credibilidad."""
         rows = []
