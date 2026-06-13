@@ -18,10 +18,15 @@ Vistas:
 from __future__ import annotations
 import streamlit as st
 import pandas as pd
+from sqlmodel import Session, select
 
 from src.pipeline import Pipeline
-from src.fifa_seed import FIFA_SNAPSHOT_EXAMPLE, load_fifa_ranking
-from src.qatar_fixture import QATAR_2022_SAMPLE
+from src.elo import EloSystem
+from src.fifa_seed import FIFA_SNAPSHOT_EXAMPLE
+from src.db import get_engine, init_db
+from src.models import Match, Tournament
+from src.ingest import ingest_qatar_backtest, ingest_live, load_matches
+from src.scraper import fetch_via_playwright, fetch_via_requests
 
 st.set_page_config(page_title="Mundial Elo + Bayes", layout="wide")
 
@@ -56,37 +61,52 @@ with st.sidebar:
 
     if mode == "En vivo 2026":
         date_range = st.text_input("Rango de fechas ESPN", "20260611-20260710")
-        engine = st.selectbox("Scraper", ["Playwright", "requests (fallback)"])
+        scraper_engine = st.selectbox("Scraper", ["Playwright", "requests (fallback)"])
         run_scrape = st.button("Actualizar jornada (scrape ESPN)")
 
 
 # ----------------------------------------------------------------------
-# Carga de partidos
+# Engine de la base de datos (cacheado por sesión)
 # ----------------------------------------------------------------------
-@st.cache_data(show_spinner=False)
-def get_qatar_matches():
-    return QATAR_2022_SAMPLE
+@st.cache_resource
+def get_db():
+    eng = get_engine()
+    init_db(eng)
+    return eng
+
+db_engine = get_db()
 
 
-def scrape_live(date_range: str, engine: str):
-    from src.scraper import fetch_via_playwright, fetch_via_requests
-    fn = fetch_via_playwright if engine == "Playwright" else fetch_via_requests
-    raw = fn(date_range, league="fifa.world")
-    return [(m.date, m.stage, m.home, m.away, m.home_goals, m.away_goals)
-            for m in raw if m.finished]
-
-
+# ----------------------------------------------------------------------
+# Carga de partidos (DB = fuente de verdad)
+# ----------------------------------------------------------------------
 if mode == "Backtest Qatar 2022":
-    matches = get_qatar_matches()
+    with Session(db_engine) as s:
+        t = s.exec(select(Tournament).where(
+            Tournament.name == "Qatar 2022")).first()
+        has_matches = t and s.exec(select(Match).where(
+            Match.tournament_id == t.id)).first()
+        if not has_matches:
+            with st.spinner("Sembrando DB con Qatar 2022…"):
+                t = ingest_qatar_backtest(s, fifa_points=fifa_points,
+                                          prefer_scrape=False)
+        matches = load_matches(s, t)
 else:
     matches = []
-    if "live_matches" in st.session_state:
-        matches = st.session_state["live_matches"]
-    if "run_scrape" in dir() and run_scrape:
-        with st.spinner("Scrapeando ESPN…"):
-            matches = scrape_live(date_range, engine)
-            st.session_state["live_matches"] = matches
-        st.success(f"{len(matches)} partidos finalizados cargados.")
+    if run_scrape:
+        fn = (fetch_via_playwright if scraper_engine == "Playwright"
+              else fetch_via_requests)
+        with st.spinner("Scrapeando ESPN y guardando en DB…"):
+            with Session(db_engine) as s:
+                t = ingest_live(s, date_range, scrape_fn=fn,
+                                fifa_points=fifa_points)
+                matches = load_matches(s, t)
+        st.success(f"{len(matches)} partidos finalizados guardados.")
+    else:
+        with Session(db_engine) as s:
+            t = s.exec(select(Tournament).where(
+                Tournament.name == "World Cup 2026")).first()
+            matches = load_matches(s, t) if t else []
 
 if not matches:
     st.info("Sin partidos cargados todavía. (En vivo: pulsa «Actualizar jornada».)")
@@ -95,7 +115,6 @@ if not matches:
 # ----------------------------------------------------------------------
 # Ejecutar pipeline
 # ----------------------------------------------------------------------
-from src.elo import EloSystem
 pipe = Pipeline(elo=EloSystem(k=float(k_factor), use_margin=use_margin))
 pipe.seed(fifa_points)
 # re-seed bayes con la fuerza elegida
