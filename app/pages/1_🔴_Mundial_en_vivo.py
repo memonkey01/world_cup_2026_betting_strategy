@@ -18,6 +18,7 @@ from src.models import Tournament
 from src.ingest import (get_or_create_tournament, seed_teams, ingest_calendar,
                         load_calendar, load_matches)
 from src.betting import BetParams, recommend_bet
+from src.strategies import load_active_strategy, strategy_to_params
 from src.scraper import fetch_via_playwright, fetch_via_requests
 from ui_common import model_controls, betting_controls
 
@@ -99,7 +100,20 @@ pipe.seed(FIFA_SNAPSHOT_EXAMPLE)
 pipe.bayes.seed_from_elo(pipe.initial_elo, strength=prior_strength)
 pipe.process_all(finished)
 
-params = BetParams(sizing=sizing, use_bayes_filter=use_filter, **common)
+# Estrategia activa de la DB (fijada en el laboratorio) tiene prioridad.
+with Session(db_engine) as s:
+    active = load_active_strategy(s)
+if active is not None:
+    params = strategy_to_params(active)
+    yld = f"{active.backtest_yield*100:.1f}%" if active.backtest_yield is not None else "n/d"
+    st.success(f"📌 Estrategia activa: **{active.label}** "
+               f"(sizing {active.sizing} · criterio {active.side_criterion} · "
+               f"filtro {'sí' if active.use_bayes_filter else 'no'} · yield Qatar {yld}). "
+               "Cámbiala en la página «Simulador».")
+else:
+    params = BetParams(sizing=sizing, use_bayes_filter=use_filter, **common)
+    st.info("No hay estrategia activa fijada. Usando los controles de la barra "
+            "lateral. Ve al «Simulador» para barrer y fijar la mejor.")
 
 # 4) KPIs rápidos
 c1, c2, c3 = st.columns(3)
