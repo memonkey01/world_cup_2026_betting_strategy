@@ -25,6 +25,37 @@ st.title("💰 Simulador de apuestas — Mundial (backtest)")
 st.caption("Mercado: gana el equipo elegido (empate o derrota = apuesta perdida). "
            "Cuotas sintéticas fijas. Esto es un backtest educativo, no consejo de apuestas.")
 
+# Panel explicativo: cómo funciona el backtest de apuestas (visible en la UI).
+with st.expander("ℹ️ ¿Cómo funciona el simulador?", expanded=False):
+    st.markdown("""
+Reproduce el Mundial partido a partido y, **antes de cada juego**, decide si
+apostar usando solo la información disponible hasta ese momento (sin mirar el
+resultado). Pasos en cada partido:
+
+1. **Elegir lado** según el *criterio* (la meta-estrategia, configurable):
+   - **Elo** → apuesta al favorito por rating.
+   - **Bayes** → apuesta al de mayor fuerza latente estimada.
+   - **Mezcla** → combina ambos con un peso ajustable.
+2. **Filtrar** (solo la 2ª estrategia): si la media Bayes del lado elegido no
+   supera el **umbral**, no se apuesta.
+3. **Arranque:** no se apuesta antes de la *jornada* indicada (default 2), para
+   dar al modelo un partido de calentamiento por equipo.
+4. **Tamaño de apuesta** (*bet sizing* dinámico):
+   - **Flat** → % fijo del bankroll.
+   - **Confianza** → escala con qué tan arriba de 50% está la prob. del lado.
+   - **Kelly fraccional** → fracción de Kelly según ventaja y cuota (0 si no hay ventaja).
+5. **Liquidar:** si el equipo gana, `bankroll += stake·(cuota−1)`; si no, se
+   pierde el stake.
+
+Se corren **dos estrategias con los mismos parámetros** salvo el filtro Bayes
+(*apostar a todos* vs *solo Bayes > umbral*) y se comparan **ROI**, **yield**
+(ganancia / total apostado), **% de acierto** y **drawdown máximo** (mayor caída
+desde un pico del bankroll).
+
+⚠️ No hay cuotas reales: se usa una **cuota decimal fija** configurable. Es un
+ejercicio de modelado, no una recomendación para apostar dinero real.
+""")
+
 
 @st.cache_resource
 def get_db():

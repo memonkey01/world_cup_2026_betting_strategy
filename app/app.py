@@ -42,16 +42,50 @@ st.markdown("""
 
 st.title("⚽ Mundial — Elo + Bayes Monitor")
 
+# Panel explicativo: cómo funciona el sistema completo (visible en la UI).
+with st.expander("ℹ️ ¿Cómo funciona este monitor?", expanded=False):
+    st.markdown("""
+El sistema procesa los partidos **en orden** y mantiene dos modelos en paralelo:
+
+1. **Semilla FIFA → Elo.** El ranking FIFA se re-centra a la escala Elo clásica
+   (~1500 de media) para dar el *rating inicial* de cada selección.
+2. **Elo por partido.** Tras cada juego: `R' = R + K·(S − E)`, donde
+   `S ∈ {1, 0.5, 0}` (victoria / empate / derrota) y `E` es la probabilidad
+   esperada (curva logística por diferencia de rating). **K** (barra lateral)
+   controla la reactividad; el **multiplicador por margen** amplifica K cuando
+   la goleada es amplia.
+3. **Bayes (Beta-Bernoulli).** Cada equipo tiene una *fuerza latente*
+   `θ ~ Beta(a, b)` con prior anclado a su Elo inicial. Cada partido es un
+   ensayo (empate = 0.5 éxito) → posterior conjugado, que da una **media** y un
+   **intervalo de credibilidad** (incertidumbre: se estrecha con más partidos).
+4. **Calibración.** La probabilidad que el Elo emite *antes* de cada partido se
+   compara con el resultado real → **Brier**, **LogLoss** y curva de fiabilidad.
+
+**Datos:** la base SQLite es la fuente de verdad. El *backtest* siembra Qatar
+2022 (offline); *en vivo* scrapea ESPN y persiste los partidos finalizados.
+
+Mueve los controles de la izquierda y todo se recalcula al instante.
+""")
+
 # ----------------------------------------------------------------------
 # Sidebar: configuracion
+# Todos los controles que el usuario mueve viven aquí. Cada cambio re-ejecuta
+# el script completo de arriba a abajo (modelo de ejecución de Streamlit), así
+# que el pipeline se recalcula con los nuevos parámetros en cada interacción.
 # ----------------------------------------------------------------------
 with st.sidebar:
     st.header("Configuración")
+    # Backtest = datos históricos offline; En vivo = scrape de ESPN.
     mode = st.radio("Modo", ["Backtest Qatar 2022", "En vivo 2026"])
+    # K controla cuánto se mueve el Elo por partido (más alto = más reactivo).
     k_factor = st.slider("Factor K (Elo)", 10, 80, 40, 5)
+    # Fuerza del prior = tamaño de muestra equivalente del prior Beta del Bayes
+    # (más alto = el prior pesa más y los resultados lo mueven menos).
     prior_strength = st.slider("Fuerza del prior Bayes", 1.0, 12.0, 4.0, 1.0)
+    # Amplifica K cuando la goleada es amplia (estilo FiveThirtyEight).
     use_margin = st.checkbox("Multiplicador por margen de gol", value=True)
 
+    # De dónde sale el Elo inicial: el snapshot de ejemplo o un JSON subido.
     fifa_source = st.radio("Ranking FIFA inicial", ["Snapshot incluido", "Subir JSON"])
     fifa_points = FIFA_SNAPSHOT_EXAMPLE
     if fifa_source == "Subir JSON":
@@ -60,6 +94,7 @@ with st.sidebar:
             import json
             fifa_points = {k: float(v) for k, v in json.load(up).items()}
 
+    # Controles que solo aplican al modo en vivo (rango de fechas + scraper).
     if mode == "En vivo 2026":
         date_range = st.text_input("Rango de fechas ESPN", "20260611-20260710")
         scraper_engine = st.selectbox("Scraper", ["Playwright", "requests (fallback)"])
@@ -129,10 +164,14 @@ lb = pd.DataFrame(pipe.combined_leaderboard())
 # ----------------------------------------------------------------------
 rep = pipe.calibration_report()
 c1, c2, c3, c4 = st.columns(4)
-c1.metric("Partidos procesados", rep["n_matches"])
-c2.metric("Brier score", f'{rep["brier"]:.4f}', help="0 = perfecto · 0.25 = azar")
-c3.metric("Log loss", f'{rep["log_loss"]:.4f}')
-c4.metric("Líder Elo", lb.iloc[0]["team"])
+c1.metric("Partidos procesados", rep["n_matches"],
+          help="Total de partidos que alimentaron el modelo.")
+c2.metric("Brier score", f'{rep["brier"]:.4f}',
+          help="Error cuadrático medio de la probabilidad. 0 = perfecto · 0.25 = azar. Menor es mejor.")
+c3.metric("Log loss", f'{rep["log_loss"]:.4f}',
+          help="Penaliza fuerte la confianza equivocada. Menor es mejor.")
+c4.metric("Líder Elo", lb.iloc[0]["team"],
+          help="Selección con mayor rating Elo tras procesar todos los partidos.")
 
 tab1, tab2, tab3, tab4, tab5 = st.tabs(
     ["🏆 Tabla", "📈 Evolución Elo", "🎲 Bayes", "🎯 Calibración",
@@ -141,6 +180,11 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs(
 # ---- Tab 1: tabla combinada ----
 with tab1:
     st.subheader("Ranking combinado Elo + Bayes")
+    st.caption(
+        "Cada fila es una selección. **Elo** = fuerza actual; **Δ Elo** = cuánto "
+        "subió/bajó respecto a su semilla FIFA. **Bayes media/inf/sup** = fuerza "
+        "latente estimada y su intervalo de credibilidad 95%. Ordenado por Elo."
+    )
     show = lb.copy()
     show.columns = ["Equipo", "Elo", "Elo inicial", "Δ Elo",
                     "Bayes media", "Bayes inf", "Bayes sup"]
@@ -149,6 +193,11 @@ with tab1:
 # ---- Tab 2: evolucion Elo por jornada ----
 with tab2:
     st.subheader("Evolución de Elo por partido")
+    st.caption(
+        "Cómo cambió el rating Elo de los mejores equipos a lo largo del torneo. "
+        "El eje X es el paso (partido procesado); las líneas se mantienen planas "
+        "cuando ese equipo no jugó en ese paso."
+    )
     top_n = st.slider("Mostrar top N equipos", 4, 16, 8)
     top_teams = [r["team"] for r in pipe.combined_leaderboard()[:top_n]]
     rows = []
