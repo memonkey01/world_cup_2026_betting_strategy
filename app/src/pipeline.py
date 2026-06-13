@@ -26,6 +26,8 @@ class Pipeline:
     pred_outcomes: list[float] = field(default_factory=list)  # score real de A
     snapshots: list[dict] = field(default_factory=list)
     initial_elo: dict[str, float] = field(default_factory=dict)
+    match_log: list[dict] = field(default_factory=list)        # foto pre-partido
+    _appearances: dict[str, int] = field(default_factory=dict)
 
     def seed(self, fifa_points: dict[str, float]) -> None:
         self.initial_elo = fifa_to_elo(fifa_points)
@@ -34,11 +36,25 @@ class Pipeline:
 
     def process_match(self, home: str, away: str, hg: int, ag: int,
                       stage: str = "group", date: str | None = None) -> dict:
-        # 1) prediccion ANTES de actualizar (para calibracion)
+        # 1) prediccion ANTES de actualizar (para calibracion + apuestas)
         p_home = expected_score(self.elo.get(home), self.elo.get(away))
         s_home, _ = match_scores(hg, ag)
         self.pred_probs.append(p_home)
         self.pred_outcomes.append(s_home)
+        # foto Bayes pre-partido y numero de aparicion por equipo
+        bayes_home = self.bayes.get(home).mean
+        bayes_away = self.bayes.get(away).mean
+        self._appearances[home] = self._appearances.get(home, 0) + 1
+        self._appearances[away] = self._appearances.get(away, 0) + 1
+        self.match_log.append({
+            "date": date, "stage": stage, "home": home, "away": away,
+            "p_home": p_home,
+            "bayes_home": bayes_home, "bayes_away": bayes_away,
+            "home_goals": hg, "away_goals": ag,
+            "home_win": hg > ag, "away_win": ag > hg,
+            "home_match_no": self._appearances[home],
+            "away_match_no": self._appearances[away],
+        })
         # 2) actualizar ambos sistemas
         rec = self.elo.update_match(home, away, hg, ag, stage=stage, match_date=date)
         self.bayes.update_match(home, away, hg, ag)
