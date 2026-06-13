@@ -5,6 +5,7 @@ best-effort (selectores/endpoint a validar en vivo); el parseo es puro y testeab
 """
 from __future__ import annotations
 from dataclasses import dataclass
+from statistics import mean
 import json
 import re
 
@@ -209,10 +210,13 @@ def parse_polymarket_events(events: list, fetched_at: str) -> list[OddsQuote]:
         vs = _parse_versus(title)
         if not vs:
             continue
-        raw_home, raw_away = vs[0].lower(), vs[1].lower()
+        # Normalizamos AMBOS lados y comparamos por nombre canónico: el título usa
+        # a veces otra grafía que el mercado ("Bosnia-Herzegovina" vs "Bosnia and
+        # Herzegovina"), así que el match por substring crudo fallaba.
+        home, away = normalize_es(vs[0]), normalize_es(vs[1])
         p_home = p_away = p_draw = None
         for mkt in (ev.get("markets") or []):
-            q = (mkt.get("question") or "").lower()
+            question = mkt.get("question") or ""
             try:
                 labels = [str(o).strip().lower() for o in json.loads(mkt["outcomes"])]
                 prices = [float(p) for p in json.loads(mkt["outcomePrices"])]
@@ -221,15 +225,20 @@ def parse_polymarket_events(events: list, fetched_at: str) -> list[OddsQuote]:
             if set(labels) != {"yes", "no"}:
                 continue
             p_yes = prices[labels.index("yes")]
-            if "draw" in q:                       # "…end in a draw?"
+            if "draw" in question.lower():        # "…end in a draw?"
                 p_draw = p_yes
-            elif raw_home in q:                   # "Will X win on…"
+                continue
+            mm = re.match(r"\s*will\s+(.+?)\s+win\b", question, re.I)  # "Will X win on…"
+            if not mm:
+                continue
+            team = normalize_es(mm.group(1))
+            if team == home:
                 p_home = p_yes
-            elif raw_away in q:                   # "Will Y win on…"
+            elif team == away:
                 p_away = p_yes
         if not (p_home and p_away):               # necesita ambos ganadores
             continue
-        out.append(_quote("polymarket", normalize_es(vs[0]), normalize_es(vs[1]),
+        out.append(_quote("polymarket", home, away,
                           price_to_decimal(p_home), price_to_decimal(p_away),
                           price_to_decimal(p_draw) if p_draw else None, fetched_at))
     return out
@@ -249,6 +258,78 @@ def parse_codere(payload: dict, fetched_at: str) -> list[OddsQuote]:
                           normalize_es(ev.get("away", "")),
                           home_dec, away_dec, draw_dec, fetched_at))
     return out
+
+
+# ----------------------------------------------------------------------
+# Analítica de cuotas: comparación entre casas (pura, testeable).
+# ----------------------------------------------------------------------
+def book_overround(home_dec, draw_dec, away_dec) -> float:
+    """Margen de la casa (*overround* / vig): suma de probabilidades implícitas
+    (1/cuota) menos 1. Mayor = la casa se queda con más; un mercado eficiente
+    tiende a 0. `draw_dec` puede ser None (mercado a 2 vías)."""
+    s = 0.0
+    for d in (home_dec, draw_dec, away_dec):
+        if d and d > 0:
+            s += 1.0 / d
+    return s - 1.0
+
+
+def compare_books(poly: list, codere: list) -> dict:
+    """Compara dos listas de cuotas (dicts tipo `latest_odds`) emparejando por
+    (home, away). Devuelve {stats, rows}:
+
+    - stats: cobertura (n_poly/n_codere/n_common), divergencia media y máxima de
+      P(local), margen medio por casa, y cuántas veces cada casa da la mejor cuota.
+    - rows: por partido en común, ordenadas por |Δ P(local)| desc.
+    """
+    pm = {(o["home"], o["away"]): o for o in poly}
+    cm = {(o["home"], o["away"]): o for o in codere}
+    common = sorted(set(pm) & set(cm))
+    rows, diffs, ov_p, ov_c = [], [], [], []
+    best = {"home": {"poly": 0, "codere": 0, "igual": 0},
+            "away": {"poly": 0, "codere": 0, "igual": 0}}
+
+    def _best(side, pd_, cd_):
+        if pd_ is None or cd_ is None:
+            return None
+        if abs(pd_ - cd_) < 1e-9:
+            best[side]["igual"] += 1
+            return "igual"
+        if pd_ > cd_:
+            best[side]["poly"] += 1
+            return "Polymarket"
+        best[side]["codere"] += 1
+        return "Codere"
+
+    for k in common:
+        p, c = pm[k], cm[k]
+        d = p["home_prob"] - c["home_prob"]
+        diffs.append(abs(d))
+        op = book_overround(p["home_decimal"], p.get("draw_decimal"), p["away_decimal"])
+        oc = book_overround(c["home_decimal"], c.get("draw_decimal"), c["away_decimal"])
+        ov_p.append(op)
+        ov_c.append(oc)
+        bh = _best("home", p["home_decimal"], c["home_decimal"])
+        _best("away", p["away_decimal"], c["away_decimal"])
+        rows.append({
+            "partido": f"{k[0]} vs {k[1]}",
+            "Poly P(local)": round(p["home_prob"], 3),
+            "Codere P(local)": round(c["home_prob"], 3),
+            "Δ P(local)": round(d, 3),
+            "mejor cuota local": bh,
+            "margen Poly %": round(op * 100, 1),
+            "margen Codere %": round(oc * 100, 1),
+        })
+    rows.sort(key=lambda r: abs(r["Δ P(local)"]), reverse=True)
+    stats = {
+        "n_poly": len(pm), "n_codere": len(cm), "n_common": len(common),
+        "div_media": mean(diffs) if diffs else 0.0,
+        "div_max": max(diffs) if diffs else 0.0,
+        "overround_poly": mean(ov_p) if ov_p else 0.0,
+        "overround_codere": mean(ov_c) if ov_c else 0.0,
+        "best_home": best["home"], "best_away": best["away"],
+    }
+    return {"stats": stats, "rows": rows}
 
 
 # ----------------------------------------------------------------------

@@ -2,7 +2,7 @@
 from src.odds import (OddsQuote, price_to_decimal, american_to_decimal,
                       implied_prob, normalize_es, parse_polymarket, parse_codere,
                       _parse_versus, detect_source, select_markets,
-                      parse_polymarket_events)
+                      parse_polymarket_events, book_overround, compare_books)
 
 
 def test_converters():
@@ -103,6 +103,33 @@ def test_parse_polymarket_yesno_unpaired_ignored():
     assert parse_polymarket(one, "2026-06-13T08:00:00") == []
 
 
+def test_book_overround():
+    # 2.0 / 2.0 (sin empate) -> 1/2 + 1/2 - 1 = 0 (mercado justo).
+    assert abs(book_overround(2.0, None, 2.0)) < 1e-9
+    # Codere típico con margen: suma de implícitas > 1.
+    assert book_overround(2.0, 3.0, 4.0) > 0
+
+
+def test_compare_books():
+    poly = [{"home": "Brazil", "away": "Morocco", "home_decimal": 1.7,
+             "away_decimal": 6.0, "draw_decimal": 3.9,
+             "home_prob": 1 / 1.7, "away_prob": 1 / 6.0},
+            {"home": "Spain", "away": "Egypt", "home_decimal": 1.1,
+             "away_decimal": 9.0, "draw_decimal": 8.0,
+             "home_prob": 1 / 1.1, "away_prob": 1 / 9.0}]
+    codere = [{"home": "Brazil", "away": "Morocco", "home_decimal": 1.67,
+               "away_decimal": 6.0, "draw_decimal": 3.75,
+               "home_prob": 1 / 1.67, "away_prob": 1 / 6.0}]  # solo 1 en común
+    out = compare_books(poly, codere)
+    s = out["stats"]
+    assert s["n_poly"] == 2 and s["n_codere"] == 1 and s["n_common"] == 1
+    assert s["div_media"] >= 0 and s["div_max"] >= 0
+    assert len(out["rows"]) == 1
+    assert out["rows"][0]["partido"] == "Brazil vs Morocco"
+    # Codere da mejor cuota local (1.67 < 1.7 -> Poly mejor en local)
+    assert s["best_home"]["poly"] + s["best_home"]["codere"] + s["best_home"]["igual"] == 1
+
+
 def test_detect_source():
     assert detect_source("https://www.codere.mx/apuestas/futbol") == "codere"
     assert detect_source("https://polymarket.com/event/world-cup") == "polymarket"
@@ -154,6 +181,28 @@ def test_parse_polymarket_events_homologa_y_ignora_subeventos():
     quotes = parse_polymarket_events(events, "t")
     assert len(quotes) == 1
     assert quotes[0].home == "Spain" and quotes[0].away == "Cape Verde"
+
+
+def test_parse_polymarket_events_grafia_distinta_titulo_vs_mercado():
+    # El título usa "Bosnia-Herzegovina" pero el mercado "Bosnia and Herzegovina":
+    # el match debe ser por nombre canónico, no por substring crudo.
+    events = [{
+        "title": "Bosnia-Herzegovina vs. Qatar",
+        "markets": [
+            {"question": "Will Qatar win on 2026-06-24?",
+             "outcomes": "[\"Yes\", \"No\"]", "outcomePrices": "[\"0.155\", \"0.845\"]"},
+            {"question": "Will Bosnia and Herzegovina win on 2026-06-24?",
+             "outcomes": "[\"Yes\", \"No\"]", "outcomePrices": "[\"0.595\", \"0.405\"]"},
+            {"question": "Will Bosnia and Herzegovina vs. Qatar end in a draw?",
+             "outcomes": "[\"Yes\", \"No\"]", "outcomePrices": "[\"0.25\", \"0.75\"]"},
+        ],
+    }]
+    quotes = parse_polymarket_events(events, "t")
+    assert len(quotes) == 1
+    q = quotes[0]
+    assert q.home == "Bosnia-Herzegovina" and q.away == "Qatar"
+    assert abs(q.home_prob - 0.595) < 1e-6      # P(Bosnia gana), no 0.155
+    assert abs(q.away_prob - 0.155) < 1e-6
 
 
 def test_parse_polymarket_events_skips_non_match():

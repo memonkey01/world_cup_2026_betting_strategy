@@ -7,6 +7,7 @@ se heredan del Backtest (mismos controles compartidos en session_state).
 """
 from __future__ import annotations
 import pandas as pd
+import altair as alt
 import streamlit as st
 from sqlmodel import Session, select
 
@@ -22,7 +23,7 @@ from src.betting import BetParams, recommend_bet
 from src.strategies import load_active_strategy, strategy_to_params
 from src.odds import (detect_source, fetch_polymarket, fetch_codere,
                       parse_polymarket_events, parse_codere, select_markets,
-                      OddsQuote, CODERE_URL)
+                      OddsQuote, CODERE_URL, compare_books)
 from src.odds_store import latest_odds, ingest_odds
 from src.scraper import fetch_via_playwright, fetch_via_requests
 from ui_common import model_controls, betting_controls
@@ -317,6 +318,52 @@ with tab_odds:
                      hide_index=True, height=360)
     else:
         st.caption("No hay partidos próximos en el calendario o no hay cuotas todavía.")
+
+    # ---- Estadísticas de comparación Polymarket vs Codere ----
+    st.divider()
+    st.markdown("**📊 Estadísticas: Polymarket vs Codere**")
+    cmp = compare_books(list(poly_map.values()), list(cod_map.values()))
+    cs = cmp["stats"]
+    if cs["n_common"] == 0:
+        st.caption("Aún no hay partidos con cuota en **ambas** fuentes. Actualiza "
+                   "Polymarket y Codere arriba para comparar.")
+    else:
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Partidos en ambas", cs["n_common"],
+                  help=f"Cobertura: Polymarket {cs['n_poly']} · Codere {cs['n_codere']}.")
+        m2.metric("Divergencia media P(local)", f"{cs['div_media']*100:.1f} pp",
+                  help=f"Diferencia absoluta media en la prob. implícita del local. "
+                       f"Máxima: {cs['div_max']*100:.1f} pp.")
+        m3.metric("Margen Polymarket", f"{cs['overround_poly']*100:.1f}%",
+                  help="Overround (vig): cuánto se queda la casa. Menor = mejor "
+                       "para el apostador. Los mercados de predicción suelen tenerlo bajo.")
+        m4.metric("Margen Codere", f"{cs['overround_codere']*100:.1f}%",
+                  delta=f"{(cs['overround_codere']-cs['overround_poly'])*100:+.1f} pp vs Poly",
+                  delta_color="inverse",
+                  help="Overround (vig) de Codere. Comparado con Polymarket.")
+        bh, ba = cs["best_home"], cs["best_away"]
+        st.caption(
+            f"**Mejor cuota** (más alta = pagas más al ganar) — Local: Polymarket "
+            f"{bh['poly']} · Codere {bh['codere']} · iguales {bh['igual']}. "
+            f"Visitante: Polymarket {ba['poly']} · Codere {ba['codere']} · "
+            f"iguales {ba['igual']}.")
+
+        cmp_df = pd.DataFrame(cmp["rows"])
+        scatter = alt.Chart(cmp_df).mark_circle(size=80, opacity=0.7).encode(
+            x=alt.X("Poly P(local):Q", title="Polymarket P(local)",
+                    scale=alt.Scale(domain=[0, 1])),
+            y=alt.Y("Codere P(local):Q", title="Codere P(local)",
+                    scale=alt.Scale(domain=[0, 1])),
+            tooltip=["partido", "Poly P(local)", "Codere P(local)", "Δ P(local)"])
+        diag = alt.Chart(pd.DataFrame({"x": [0, 1]})).mark_line(
+            strokeDash=[4, 4], color="gray").encode(x="x:Q", y="x:Q")
+        st.altair_chart((scatter + diag).properties(height=340),
+                        use_container_width=True)
+        st.caption("Cada punto es un partido; la diagonal punteada = acuerdo total. "
+                   "Cuanto más lejos de la línea, más discrepan las casas (posible valor).")
+
+        st.markdown("**Mayores divergencias**")
+        st.dataframe(cmp_df.head(12), use_container_width=True, hide_index=True)
 
     st.divider()
     st.selectbox(

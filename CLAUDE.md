@@ -40,7 +40,7 @@ pipeline Elo/Bayes lee de ella.
 | [app/src/ingest.py](app/src/ingest.py) | scraper ↔ DB ↔ pipeline: `ingest_qatar_backtest`, `ingest_live`, `ingest_calendar`, `load_matches` (finalizados), `load_calendar` (todos), `persist_snapshots`, `clear_snapshots` |
 | [app/src/betting.py](app/src/betting.py) | Motor puro de apuestas: `BetParams`, `pick_side`, `stake_amount`, `simulate`, `recommend_bet`, `sweep_strategies` |
 | [app/src/strategies.py](app/src/strategies.py) | Estrategia activa en la DB: `save_active_strategy`, `load_active_strategy`, `strategy_to_params` |
-| [app/src/odds.py](app/src/odds.py) | Capa de cuotas: `OddsQuote`, conversores, `detect_source`, `select_markets` (filtro regex), `parse_polymarket_events`/`parse_polymarket`/`parse_codere` (puro) + `fetch_*` (red, Polymarket por tag/eventos paginados) |
+| [app/src/odds.py](app/src/odds.py) | Capa de cuotas: `OddsQuote`, conversores, `detect_source`, `select_markets` (filtro regex), `parse_polymarket_events`/`parse_polymarket`/`parse_codere` (puro), `book_overround`/`compare_books` (analítica Poly vs Codere) + `fetch_*` (red, Polymarket por tag/eventos paginados) |
 | [app/src/odds_store.py](app/src/odds_store.py) | Persistencia de cuotas: `ingest_odds`, `latest_odds`, `latest_scrape_iso` |
 | [app/src/dbview.py](app/src/dbview.py) | Inspección read-only de la DB: `table_schema`, `table_rows` |
 | [app/ui_common.py](app/ui_common.py) | Controles de sidebar compartidos entre páginas (`model_controls`, `betting_controls`, `fifa_ranking`) |
@@ -95,6 +95,10 @@ La cuota casa con el calendario por `(home, away)`: los nombres de todas las
 fuentes convergen al canónico ESPN vía `normalize_team` (`ALT_NAME_MAP` homologa
 "Cabo Verde"→"Cape Verde", "Côte d'Ivoire"→"Ivory Coast", "DR Congo"→"Congo DR",
 etc.) — validado: 135/135 partidos de Polymarket casan con el calendario 2026.
+Debajo de la comparativa, una sección **📊 Estadísticas Polymarket vs Codere**
+(`compare_books`) muestra cobertura, divergencia de P(local), **margen/overround**
+por casa (`book_overround`), quién da la mejor cuota y un scatter de acuerdo
+(validado en vivo: margen Poly ~0.6% vs Codere ~6.7%, divergencia media ~2pp).
 Debajo, comparar Codere/Polymarket vs el modelo entrenado con finalizados 2026, y
 **elegir ahí la fuente** que alimenta las recomendaciones (key `live_odds_source`).
 
