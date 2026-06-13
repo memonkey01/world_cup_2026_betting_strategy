@@ -18,7 +18,8 @@ from src.fifa_seed import FIFA_SNAPSHOT_EXAMPLE
 from src.db import get_engine, init_db
 from src.models import Match, Tournament
 from src.ingest import ingest_qatar_backtest, load_matches
-from src.betting import BetParams, simulate
+from src.betting import BetParams, simulate, sweep_strategies
+from src.strategies import save_active_strategy
 from ui_common import model_controls, betting_controls
 
 st.set_page_config(page_title="Simulador de apuestas", layout="wide")
@@ -130,7 +131,7 @@ line = alt.Chart(curve_df).mark_line().encode(
     y=alt.Y("bankroll:Q", title="Bankroll"),
     color=alt.Color("Estrategia:N", title="Estrategia"),
 ).properties(height=420)
-rule = alt.Chart(pd.DataFrame({"y": [float(bankroll0)]})).mark_rule(
+rule = alt.Chart(pd.DataFrame({"y": [float(common["bankroll0"])]})).mark_rule(
     strokeDash=[4, 4], color="gray").encode(y="y:Q")
 st.altair_chart(line + rule, use_container_width=True)
 
@@ -141,3 +142,47 @@ with tA:
     st.dataframe(pd.DataFrame(res_all["bets"]), use_container_width=True, height=400)
 with tB:
     st.dataframe(pd.DataFrame(res_flt["bets"]), use_container_width=True, height=400)
+
+# ----------------------------------------------------------------------
+# Laboratorio: barrido de estrategias y fijar la ganadora
+# ----------------------------------------------------------------------
+st.subheader("🧪 Laboratorio — comparar estrategias y fijar la mejor")
+st.caption("Barre sizing × criterio de lado × filtro Bayes sobre Qatar y rankea "
+           "por yield (ganancia / total apostado).")
+
+base_params = BetParams(**common)   # sin sizing/filtro: el barrido los varía
+ranking = sweep_strategies(pipe.match_log, base_params)
+
+LABELS = {"flat": "Flat", "confidence": "Confianza", "kelly": "Kelly",
+          "elo": "Elo", "bayes": "Bayes", "blend": "Mezcla"}
+rank_rows = []
+for i, r in enumerate(ranking):
+    m = r["metrics"]
+    rank_rows.append({
+        "#": i + 1,
+        "sizing": LABELS[r["sizing"]],
+        "criterio": LABELS[r["side_criterion"]],
+        "filtro Bayes": "sí" if r["use_bayes_filter"] else "no",
+        "yield %": round(m["yield"] * 100, 1),
+        "ROI %": round(m["roi"] * 100, 1),
+        "apuestas": m["n_bets"],
+        "% acierto": round(m["win_rate"] * 100, 1),
+        "drawdown": round(m["max_drawdown"], 0),
+    })
+st.dataframe(pd.DataFrame(rank_rows), use_container_width=True, hide_index=True,
+             height=380)
+
+opciones = {f'#{i+1} · {LABELS[r["sizing"]]} + {LABELS[r["side_criterion"]]}'
+            f' + filtro {"sí" if r["use_bayes_filter"] else "no"}': i
+            for i, r in enumerate(ranking)}
+elegida = st.selectbox("Estrategia a fijar", list(opciones), index=0)
+idx = opciones[elegida]
+win = ranking[idx]
+if st.button("📌 Fijar como estrategia activa"):
+    with Session(db_engine) as s:
+        save_active_strategy(s, win["params"], elegida,
+                             yield_=win["metrics"]["yield"],
+                             roi=win["metrics"]["roi"])
+    st.success(f"Estrategia activa fijada: {elegida} "
+               f"(yield {win['metrics']['yield']*100:.1f}%). "
+               "La página «Mundial en vivo» la usará.")
