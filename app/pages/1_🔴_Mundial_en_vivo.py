@@ -33,48 +33,18 @@ st.caption("Scrapea ESPN, guarda el calendario en la DB y sugiere a quién apost
 
 with st.expander("ℹ️ ¿Cómo funciona?", expanded=False):
     st.markdown("""
+Esta página **detecta oportunidades y simula** con la estrategia **definida en
+🧪 Qatar 2022** (no se redefine aquí):
+
 1. **Actualizar** scrapea ESPN para el rango de fechas y guarda **todos** los
    partidos (finalizados + programados) en la base de datos.
-2. El modelo Elo/Bayes se entrena con los **finalizados** y, para cada partido
-   **programado**, se recomienda lado + stake según la estrategia (sizing).
-3. Los parámetros (K, prior, cuota, criterio, umbral) se heredan del **Backtest**.
+2. El modelo Elo/Bayes se entrena con los **finalizados** (K/prior/margen del
+   sidebar, heredados del backtest).
+3. Para cada partido **programado** se recomienda lado + stake aplicando la
+   **estrategia activa** (sizing, criterio, filtro, bankroll) y la **cuota real**
+   de la fuente elegida en la tab 💱 Cuotas. Si no hay estrategia activa (o activas
+   el override), usas controles manuales.
 """)
-
-# Controles compartidos (mismos que Backtest) + sizing por botones + scrape
-k_factor, prior_strength, use_margin = model_controls()
-common = betting_controls()
-
-st.sidebar.header("Estrategia (sizing)")
-if "live_sizing" not in st.session_state:
-    st.session_state["live_sizing"] = "kelly"
-b1, b2, b3 = st.sidebar.columns(3)
-if b1.button("Flat"):
-    st.session_state["live_sizing"] = "flat"
-if b2.button("Confianza"):
-    st.session_state["live_sizing"] = "confidence"
-if b3.button("Kelly"):
-    st.session_state["live_sizing"] = "kelly"
-sizing = st.session_state["live_sizing"]
-use_filter = st.sidebar.checkbox("Filtrar por umbral de Bayes", value=False,
-                                 key="live_use_filter")
-st.sidebar.caption(f"Sizing activo: **{sizing}**")
-st.sidebar.caption("⚠️ Si hay una **estrategia activa** fijada en el Simulador, "
-                   "ésta tiene prioridad y estos botones se ignoran.")
-override_active = st.sidebar.checkbox(
-    "Ignorar estrategia activa (override manual)", value=False,
-    key="live_override")
-
-# La fuente de cuotas se elige en la tab 💱 Cuotas (no en el sidebar): se ve
-# junto a la comparativa y se recuerda en session_state.
-st.session_state.setdefault("live_odds_source", "polymarket")
-
-st.sidebar.header("Scrape ESPN")
-date_range = st.sidebar.text_input("Rango de fechas", "20260611-20260710",
-                                   key="live_date_range")
-scraper_engine = st.sidebar.selectbox("Scraper", ["Playwright", "requests (fallback)"],
-                                      key="live_scraper")
-run_scrape = st.sidebar.button("Actualizar (scrape ESPN)")
-
 
 @st.cache_resource
 def get_db():
@@ -84,6 +54,75 @@ def get_db():
 
 
 db_engine = get_db()
+
+# ----------------------------------------------------------------------
+# Sidebar — en vivo NO se redefine la estrategia: se usa la DEFINIDA en el
+# backtest (estrategia activa en la DB). Aquí solo el modelo (entrena el 2026)
+# y el scrape; el override manual es opcional.
+# Workflow: 🧪 Qatar 2022 DEFINE la estrategia → 🔴 en vivo DETECTA y SIMULA con ella.
+# ----------------------------------------------------------------------
+st.sidebar.caption("Aquí **detectamos oportunidades y simulamos** con la estrategia "
+                   "definida en 🧪 Qatar 2022. Solo configuras el modelo y el scrape.")
+
+# Modelo que entrena el 2026 con los finalizados (K/prior/margen, claves compartidas
+# con el backtest → heredan sus valores).
+k_factor, prior_strength, use_margin = model_controls()
+
+# Estrategia activa (definida en el laboratorio). Se captura dentro de la sesión.
+st.sidebar.header("Estrategia")
+with Session(db_engine) as s:
+    active = load_active_strategy(s)
+    if active is not None:
+        active_summary = {
+            "label": active.label, "sizing": active.sizing,
+            "side_criterion": active.side_criterion,
+            "use_bayes_filter": active.use_bayes_filter,
+            "yield": active.backtest_yield,
+        }
+        params_active = strategy_to_params(active)
+    else:
+        active_summary, params_active = None, None
+
+if active_summary is not None:
+    yld = (f"{active_summary['yield']*100:.1f}%"
+           if active_summary["yield"] is not None else "n/d")
+    st.sidebar.success(f"📌 {active_summary['label']}")
+    st.sidebar.caption(
+        f"sizing **{active_summary['sizing']}** · criterio "
+        f"**{active_summary['side_criterion']}** · filtro "
+        f"**{'sí' if active_summary['use_bayes_filter'] else 'no'}** · "
+        f"yield Qatar {yld}")
+    override_active = st.sidebar.checkbox(
+        "Ajustar manualmente (ignorar la activa)", value=False, key="live_override")
+else:
+    st.sidebar.warning("Sin estrategia activa. Defínela en 🧪 Qatar 2022 "
+                       "(recomendado) o ajústala manualmente aquí abajo.")
+    override_active = True
+
+# Solo en modo manual se muestran los controles de estrategia.
+if override_active:
+    st.sidebar.caption("Modo manual: defines la estrategia a mano (no usa la activa).")
+    sizing = st.sidebar.selectbox(
+        "Bet sizing", ["flat", "confidence", "kelly"],
+        format_func={"flat": "Flat (% fijo)",
+                     "confidence": "Proporcional a confianza",
+                     "kelly": "Kelly fraccional"}.get, key="live_sizing")
+    use_filter = st.sidebar.checkbox("Filtrar por umbral de Bayes", value=False,
+                                     key="live_use_filter")
+    common = betting_controls()
+    params = BetParams(sizing=sizing, use_bayes_filter=use_filter, **common)
+else:
+    params = params_active
+
+# La fuente de cuotas se elige en la tab 💱 Cuotas (no en el sidebar).
+st.session_state.setdefault("live_odds_source", "polymarket")
+
+st.sidebar.header("Scrape ESPN")
+date_range = st.sidebar.text_input("Rango de fechas", "20260611-20260710",
+                                   key="live_date_range")
+scraper_engine = st.sidebar.selectbox("Scraper", ["Playwright", "requests (fallback)"],
+                                      key="live_scraper")
+run_scrape = st.sidebar.button("Actualizar (scrape ESPN)")
 
 # 1) Scrape -> persistir TODO el calendario en la DB
 if run_scrape:
@@ -113,24 +152,17 @@ pipe.seed(FIFA_SNAPSHOT_EXAMPLE)
 pipe.bayes.seed_from_elo(pipe.initial_elo, strength=prior_strength)
 pipe.process_all(finished)
 
-# Estrategia activa de la DB (salvo override manual).
-with Session(db_engine) as s:
-    active = load_active_strategy(s)
-if active is not None and not override_active:
-    params = strategy_to_params(active)
-    yld = f"{active.backtest_yield*100:.1f}%" if active.backtest_yield is not None else "n/d"
-    st.success(f"📌 Estrategia activa: **{active.label}** "
-               f"(sizing {active.sizing} · criterio {active.side_criterion} · "
-               f"filtro {'sí' if active.use_bayes_filter else 'no'} · yield Qatar {yld}). "
-               "Marca «Ignorar estrategia activa» para usar los controles de la izquierda.")
+# Estado de la estrategia en uso (decidida en el sidebar).
+if active_summary is not None and not override_active:
+    st.success(f"🎯 Simulando 2026 con la estrategia definida en Qatar 2022: "
+               f"**{active_summary['label']}**. Cambia a modo manual en la barra "
+               "lateral si quieres experimentar.")
+elif active_summary is not None:
+    st.info("Modo manual: ignorando la estrategia activa; usando los controles de "
+            "la barra lateral.")
 else:
-    params = BetParams(sizing=sizing, use_bayes_filter=use_filter, **common)
-    if active is not None:
-        st.info("Override manual activo: usando sizing/criterio de la barra lateral "
-                "(ignorando la estrategia activa).")
-    else:
-        st.info("No hay estrategia activa fijada. Usando los controles de la barra "
-                "lateral. Ve al «Simulador» para barrer y fijar la mejor.")
+    st.warning("Sin estrategia activa. Estás en modo manual; ve a 🧪 Qatar 2022 para "
+               "definir y fijar una (es el flujo recomendado).")
 
 # 4) Tres tabs: Calendario (info) · Cuotas (Codere+Polymarket) · Recomendaciones
 tab_cal, tab_odds, tab_rec = st.tabs(
@@ -282,7 +314,7 @@ with tab_rec:
         o = odds_map.get((m["home"], m["away"]))
         mo = {"home": o["home_decimal"], "away": o["away_decimal"]} if o else None
         r = recommend_bet(pipe.prematch_rec(m["home"], m["away"]),
-                          float(common["bankroll0"]), params, match_odds=mo)
+                          float(params.bankroll0), params, match_odds=mo)
         if r["bet"]:
             st.markdown(f"🔵 {m['home']} vs {m['away']} · {m['stage']} → "
                         f"**Apostar: {r['pick']}** · stake **{r['stake']:.0f}** "
