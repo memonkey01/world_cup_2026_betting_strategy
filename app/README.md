@@ -134,9 +134,12 @@ parámetros (K, prior, cuota, criterio, umbral…) se **comparten entre páginas
 - **🔴 Mundial en vivo (producción):** scrapea ESPN y guarda **todo el calendario**
   (finalizados + programados). En **3 tabs**:
   - **📅 Calendario** — partidos por fecha con su estado.
-  - **💱 Cuotas** — hub: pega una **URL** (detecta Codere/Polymarket), **"Actualizar
-    solo cuotas"** busca al instante; tabla comparativa Codere/Polymarket vs modelo
-    2026; **aquí eliges la fuente** que alimenta las recomendaciones.
+  - **💱 Cuotas** — hub en 2 pasos. **Polymarket:** "🔎 Buscar mercados" (query del
+    `search` + **filtro regex** opcional client-side) llena un **preview** con un
+    checkbox *guardar* por mercado (default: los que casan con el calendario) y
+    "💾 Guardar seleccionadas" ingesta solo los marcados. **Codere:** su propio botón
+    desde la URL pegada. Debajo, tabla comparativa Codere/Polymarket vs modelo 2026
+    y **el selector de la fuente** que alimenta las recomendaciones.
   - **🎯 Recomendaciones** — lado + stake por partido con la **estrategia activa**
     (toggle "Ignorar estrategia activa") y la **cuota real** de la fuente elegida.
   Necesita red; sin calendario en la DB muestra un aviso.
