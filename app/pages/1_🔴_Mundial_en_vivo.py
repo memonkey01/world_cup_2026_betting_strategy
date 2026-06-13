@@ -55,6 +55,8 @@ sizing = st.session_state["live_sizing"]
 use_filter = st.sidebar.checkbox("Filtrar por umbral de Bayes", value=False,
                                  key="live_use_filter")
 st.sidebar.caption(f"Sizing activo: **{sizing}**")
+st.sidebar.caption("⚠️ Si hay una **estrategia activa** fijada en el Simulador, "
+                   "ésta tiene prioridad y estos botones se ignoran.")
 
 st.sidebar.header("Cuotas")
 odds_source = st.sidebar.selectbox("Fuente de cuotas (en vivo)",
@@ -133,6 +135,9 @@ c3.metric("Programados", len(calendar) - len(finished))
 
 # 5) Vista tipo calendario (agrupada por fecha)
 st.subheader("📅 Calendario")
+st.caption("✅ finalizado (marcador) · 🔵 programado con apuesta sugerida · "
+           "⚪ programado sin apuesta. *Warm-up* = el equipo aún no llega a la "
+           "jornada de arranque; *filtro Bayes* = no supera el umbral.")
 by_date: dict[str, list[dict]] = {}
 for m in calendar:
     by_date.setdefault(m["date"], []).append(m)

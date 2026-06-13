@@ -10,13 +10,15 @@ import streamlit as st
 from sqlmodel import Session
 
 from src.db import get_engine, init_db
-from src.models import Team, Tournament, Match, RatingSnapshot
+from src.models import Team, Tournament, Match, RatingSnapshot, Strategy, Odds
 from src.dbview import table_schema, table_rows
 
 st.set_page_config(page_title="Datos — Explorador", layout="wide")
 st.title("🗄️ Datos — Explorador de modelos")
-st.caption("Vista read-only de las tablas de la base de datos para validar los "
-           "modelos: esquema y filas con filtro por torneo.")
+st.caption("Vista read-only de TODAS las tablas de la base de datos para validar "
+           "los modelos: esquema (columnas/tipos/nullable/PK) y filas. El filtro "
+           "por torneo aplica a las tablas que tienen `tournament_id` "
+           "(Match, RatingSnapshot, Odds); Team, Tournament y Strategy son globales.")
 
 
 @st.cache_resource
@@ -38,7 +40,8 @@ sel = st.selectbox("Filtrar por torneo (Match y RatingSnapshot)", list(opciones)
 tournament_id = opciones[sel]
 
 TABLES = [("Teams", Team), ("Tournaments", Tournament),
-          ("Matches", Match), ("RatingSnapshots", RatingSnapshot)]
+          ("Matches", Match), ("RatingSnapshots", RatingSnapshot),
+          ("Strategies", Strategy), ("Odds", Odds)]
 
 for tab, (label, model) in zip(st.tabs([t[0] for t in TABLES]), TABLES):
     with tab:
