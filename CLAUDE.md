@@ -44,37 +44,42 @@ pipeline Elo/Bayes lee de ella.
 | [app/src/odds_store.py](app/src/odds_store.py) | Persistencia de cuotas: `ingest_odds`, `latest_odds`, `latest_scrape_iso` |
 | [app/src/dbview.py](app/src/dbview.py) | Inspección read-only de la DB: `table_schema`, `table_rows` |
 | [app/ui_common.py](app/ui_common.py) | Controles de sidebar compartidos entre páginas (`model_controls`, `betting_controls`, `fifa_ranking`) |
-| [app/app.py](app/app.py) | 📊 Página **Backtest** (Qatar) — monitor Elo/Bayes |
+| [app/app.py](app/app.py) | 🏠 Página **Inicio** — guía del workflow + tablero de estado (¿calendario?/¿estrategia?/¿cuotas?) con `st.page_link`. No entrena ni apuesta. |
 | [app/pages/1_🔴_Mundial_en_vivo.py](app/pages/) | 🔴 Página **en vivo**: scrape ESPN → DB (calendario) + recomendaciones por partido |
-| [app/pages/2_💰_Simulador_Apuestas.py](app/pages/) | 💰 Página **simulador** (backtest de apuestas) |
-| [app/pages/3_🗄️_Datos.py](app/pages/) | 🗄️ Página **explorador de datos** (esquema + filas por tabla, read-only) |
+| [app/pages/2_🧪_Qatar_2022.py](app/pages/) | 🧪 Página **laboratorio**: monitor Elo/Bayes + backtest de apuestas + fijar estrategia (todo ligado al sidebar) |
+| [app/pages/3_🗄️_Datos.py](app/pages/) | 🗄️ Página **explorador de datos** (expanders: head, nº filas, última actualización, esquema) |
 | [app/tests/](app/tests/) | `test_pipeline.py`, `test_models.py`, `test_ingest.py`, `test_betting.py`, `test_dbview.py` |
 
-`app.py` es la página Backtest; `pages/` contiene Mundial en vivo y Simulador. Los
-parámetros se comparten entre páginas vía `session_state` (helpers en
-`ui_common.py`). El simulador consume `Pipeline.match_log` (foto pre-partido) y la
-página en vivo usa `Pipeline.prematch_rec` + `betting.recommend_bet` para
+La app es un **workflow de 4 etapas**: `app.py` (Inicio/guía) → `pages/2` (Qatar
+2022, laboratorio) → `pages/1` (Mundial en vivo, producción) → `pages/3` (Datos).
+Los parámetros se comparten entre páginas vía `session_state` (helpers en
+`ui_common.py`). El laboratorio consume `Pipeline.match_log` (foto pre-partido) y
+la página en vivo usa `Pipeline.prematch_rec` + `betting.recommend_bet` para
 recomendar lado + stake en cada partido programado del calendario.
 
-**Flujo Laboratorio→Producción:** el Simulador barre estrategias sobre Qatar
-(`sweep_strategies`, rankeadas por yield) y fija la ganadora en la DB (`Strategy`
-vía `save_active_strategy`); la página en vivo la lee (`load_active_strategy` +
-`strategy_to_params`) y recomienda 2026 con ella.
+**Flujo Laboratorio→Producción:** en **Qatar 2022** configuras el sidebar (modelo +
+apuesta + sizing + filtro), ves el monitor Elo/Bayes, corres el backtest con
+**esos** params y «Guardar configuración actual» fija exactamente esos params como
+estrategia activa (`Strategy` vía `save_active_strategy`). El sidebar y la
+estrategia que se fija están **ligados**; el sweep (`sweep_strategies`, rankeado por
+yield) es opcional y «Aplicar al panel» copia la combo elegida al sidebar. La
+página en vivo lee la activa (`load_active_strategy` + `strategy_to_params`) y
+recomienda 2026 con ella.
 
 **Cuotas reales:** `src/odds.py` (parsers puros + fetchers best-effort de
-Polymarket/Codere) → `Odds` (histórico) vía `odds_store`. El Simulador scrapea con
-caché 24h y compara con el modelo; la página en vivo pasa la cuota real por partido
-a `recommend_bet(..., match_odds=...)` según la fuente elegida (Polymarket por
-defecto). Selectores Codere / shape Polymarket: best-effort, validar en vivo.
-`parse_polymarket` soporta mercados de 2 outcomes y Yes/No "Will X beat Y"
-(emparejados por partido). El Backtest persiste `RatingSnapshot` (clear+rewrite)
-tras cada corrida; la página en vivo permite override manual de la estrategia activa.
+Polymarket/Codere) → `Odds` (histórico) vía `odds_store`. La página en vivo pasa la
+cuota real por partido a `recommend_bet(..., match_odds=...)` según la fuente
+elegida (selector en la tab Cuotas, Polymarket por defecto). Selectores Codere /
+shape Polymarket: best-effort, validar en vivo. `parse_polymarket` soporta mercados
+de 2 outcomes y Yes/No "Will X beat Y" (emparejados por partido). Qatar 2022
+persiste `RatingSnapshot` (clear+rewrite) tras cada corrida; la página en vivo
+permite override manual de la estrategia activa.
 
 La página **Mundial en vivo** está en 3 tabs (Calendario / Cuotas / Recomendaciones).
 El **hub de cuotas** vive en la tab Cuotas: pegar URL con `detect_source`,
 "Actualizar solo cuotas" (Polymarket por query + Codere si la URL es de Codere),
-y comparar Codere/Polymarket vs el modelo entrenado con finalizados 2026. El
-Simulador ya no aloja el panel de cuotas (solo backtest + laboratorio).
+comparar Codere/Polymarket vs el modelo entrenado con finalizados 2026, y **elegir
+ahí la fuente** que alimenta las recomendaciones (key `live_odds_source` en session).
 
 Flujo: `Pipeline.seed(fifa_points)` → `process_all(matches)` donde cada `match`
 es la tupla `(date, stage, home, away, home_goals, away_goals)`. Elo y Bayes se
@@ -82,12 +87,16 @@ actualizan en paralelo; antes de cada partido se guarda `P(A gana)` para calibra
 
 ## Páginas (Streamlit multipage)
 
-- **📊 Backtest (`app.py`):** offline, siembra `QATAR_2022_SAMPLE` en la DB y
-  muestra el monitor Elo/Bayes (sin red).
+- **🏠 Inicio (`app.py`):** guía del workflow + tablero de estado (sin red, sin
+  modelo). Muestra si hay calendario/estrategia/cuotas y enlaza a cada página.
+- **🧪 Qatar 2022 (`pages/2_…`):** laboratorio offline. Siembra `QATAR_2022_SAMPLE`,
+  muestra el monitor Elo/Bayes, corre el backtest de apuestas con los params del
+  sidebar y fija esa configuración como estrategia activa (ligado).
 - **🔴 Mundial en vivo (`pages/1_…`):** scrapea `fifa.world` de ESPN por rango de
   fechas (`YYYYMMDD-YYYYMMDD`), persiste **todo el calendario** (finalizados +
-  programados) y recomienda lado + stake en los programados.
-- **💰 Simulador (`pages/2_…`):** backtest de apuestas (dos estrategias).
+  programados) y recomienda lado + stake en los programados con la estrategia activa.
+- **🗄️ Datos (`pages/3_…`):** explorador read-only (expanders con head/esquema/última
+  actualización por tabla).
 
 Endpoint ESPN (sin API key):
 `https://site.api.espn.com/apis/site/v2/sports/soccer/fifa.world/scoreboard?dates=YYYYMMDD-YYYYMMDD`

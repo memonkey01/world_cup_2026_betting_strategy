@@ -38,9 +38,9 @@ uv run streamlit run app.py      # 2. abre el monitor en el navegador
 ```
 
 Streamlit imprime una URL local (por defecto http://localhost:8501) y la abre
-sola. En la barra lateral hay tres páginas (ver «Páginas» abajo): **📊 Backtest**
-(la principal, *no necesita red*), **🔴 Mundial en vivo** y **💰 Simulador de
-apuestas**.
+sola. La app es un **workflow de 4 etapas** (ver «Páginas» abajo): **🏠 Inicio**
+(guía + estado), **🧪 Qatar 2022** (laboratorio, *no necesita red*), **🔴 Mundial
+en vivo** (producción) y **🗄️ Datos**.
 
 Para el modo en vivo (scrape de ESPN) instala una sola vez el navegador:
 
@@ -103,52 +103,51 @@ src/odds.py           # capa de cuotas (OddsQuote, parsers Polymarket/Codere, fe
 src/odds_store.py     # persistencia de cuotas en la DB (Odds: histórico, última)
 src/dbview.py         # inspección read-only de la DB (table_schema, table_rows)
 ui_common.py          # controles de sidebar compartidos entre páginas (session_state)
-app.py                # 📊 Backtest (Qatar) — monitor Elo/Bayes
+app.py                # 🏠 Inicio — guía del workflow + tablero de estado
 pages/1_🔴_Mundial_en_vivo.py     # scrape ESPN → DB (calendario) + recomendaciones
-pages/2_💰_Simulador_Apuestas.py  # backtest de apuestas (2 estrategias)
-pages/3_🗄️_Datos.py               # explorador de datos (esquema + filas por tabla)
+pages/2_🧪_Qatar_2022.py          # laboratorio: monitor Elo/Bayes + backtest + fijar
+pages/3_🗄️_Datos.py               # explorador de datos (head + esquema por tabla)
 data/worldcup.db      # SQLite (runtime, gitignored) — finalizados + calendario
 tests/                # test_pipeline, test_models, test_ingest, test_betting, test_dbview
 ```
 
-## Páginas (multipage)
+## Páginas — el workflow en 4 etapas
 
-Al correr `uv run streamlit run app.py`, la barra lateral muestra tres páginas.
-Los parámetros (K, prior, cuota, criterio, umbral…) se **comparten entre páginas**
-vía `session_state` (helpers en `ui_common.py`), así backtest, vivo y simulador
-concuerdan.
+Al correr `uv run streamlit run app.py`, la barra lateral muestra las páginas. No
+es "una app con páginas", sino un **flujo Laboratorio → Producción**: entrenas y
+fijas una estrategia con Qatar 2022 y la página en vivo la usa para 2026. Los
+parámetros (K, prior, cuota, criterio, umbral…) se **comparten entre páginas** vía
+`session_state` (helpers en `ui_common.py`).
 
-- **📊 Backtest (app.py):** monitor Elo/Bayes sobre Qatar 2022 — tabla, evolución
-  de Elo, distribución bayesiana, calibración y evolución combinada. Persiste la
-  evolución (`RatingSnapshot`) tras cada corrida y permite **subir un ranking FIFA**
-  en JSON.
-- **🔴 Mundial en vivo:** scrapea ESPN y guarda **todo el calendario** (finalizados
-  + programados) en la DB. Organizada en **3 tabs**:
-  - **📅 Calendario** — partidos por fecha con su estado (info).
-  - **💱 Cuotas** — hub de cuotas: pega una **URL** (detecta Codere/Polymarket por
-    dominio), ajusta el query de Polymarket y pulsa **"Actualizar solo cuotas"**
-    (busca al instante, independiente del scrape de calendario); tabla comparativa
-    Codere vs Polymarket vs modelo 2026 (con "valor").
-  - **🎯 Recomendaciones** — lado + stake por partido usando la **estrategia activa**
-    (con toggle **"Ignorar estrategia activa"**) y la **cuota real** de la fuente
-    elegida.
+- **🏠 Inicio (app.py):** guía del workflow + **tablero de estado** (¿hay calendario
+  2026?, ¿estrategia fijada?, ¿cuotas <24h?) con enlaces a cada página. No entrena
+  ni apuesta; sin red.
+- **🧪 Qatar 2022 (laboratorio):** una sola página, paso a paso:
+  1. configuras el sidebar (modelo: K/prior/margen · apuesta: bankroll/cuota/criterio/
+     umbral/jornada/sizing/filtro),
+  2. **monitor del modelo** Elo/Bayes (tabla, evolución Elo, Bayes, calibración,
+     evolución combinada) — persiste `RatingSnapshot` y permite subir ranking FIFA,
+  3. **backtest de apuestas** con esos params (ROI, yield, acierto, drawdown, curva),
+  4. **«Guardar configuración actual»** fija exactamente esos params como estrategia
+     activa (sidebar y fijar **ligados**). El expander **🔬 Explorar combinaciones**
+     barre las 18 variantes y «Aplicar al panel» copia la elegida al sidebar.
+- **🔴 Mundial en vivo (producción):** scrapea ESPN y guarda **todo el calendario**
+  (finalizados + programados). En **3 tabs**:
+  - **📅 Calendario** — partidos por fecha con su estado.
+  - **💱 Cuotas** — hub: pega una **URL** (detecta Codere/Polymarket), **"Actualizar
+    solo cuotas"** busca al instante; tabla comparativa Codere/Polymarket vs modelo
+    2026; **aquí eliges la fuente** que alimenta las recomendaciones.
+  - **🎯 Recomendaciones** — lado + stake por partido con la **estrategia activa**
+    (toggle "Ignorar estrategia activa") y la **cuota real** de la fuente elegida.
   Necesita red; sin calendario en la DB muestra un aviso.
+- **🗄️ Datos:** explorador read-only — por tabla (Teams / Tournaments / Matches /
+  RatingSnapshots / Strategies / Odds), un expander con `head()`, nº de filas,
+  **última actualización** y esquema, con filtro por torneo.
 
 > ⚠️ Los selectores de Codere y la forma de los mercados de Polymarket son
 > *best-effort* — pueden requerir ajuste contra la red real en el primer scrape.
-> El scraping de cuotas es para análisis personal, no redistribución.
-
-**Flujo:** Laboratorio (Qatar) → barrer y **fijar la mejor estrategia** → la página
-en vivo recomienda 2026 con esa estrategia activa.
-- **💰 Simulador de apuestas (laboratorio):** backtest al ganador sobre Qatar 2022
-  con bet sizing dinámico y meta-estrategia configurable. Compara *apostar a todos*
-  vs *solo Bayes > umbral*, y **barre las 18 combinaciones** (sizing × criterio ×
-  filtro) rankeándolas por **yield**; permite **fijar la ganadora** como estrategia
-  activa en la DB. (La gestión de cuotas reales Codere/Polymarket vive ahora en la
-  tab **💱 Cuotas** de la página *Mundial en vivo*; el parser de Polymarket soporta
-  mercados de 2 outcomes y mercados Yes/No "Will X beat Y" emparejados por partido.)
-- **🗄️ Datos:** explorador read-only de la DB para validar los modelos — por tabla
-  (Teams / Tournaments / Matches / RatingSnapshots / Strategies / Odds) muestra nº de
-  filas, esquema y datos, con filtro por torneo.
+> `parse_polymarket` soporta mercados de 2 outcomes y Yes/No "Will X beat Y"
+> emparejados por partido. El scraping de cuotas es para análisis personal, no
+> redistribución.
 
 Backtest educativo con cuotas sintéticas fijas, no consejo de apuestas.
