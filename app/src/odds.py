@@ -90,6 +90,28 @@ def _parse_versus(question: str) -> tuple[str, str] | None:
     return None
 
 
+def select_markets(payload: list, pattern: str | None = None) -> list:
+    """Filtra mercados crudos de la Gamma API por regex (case-insensitive) sobre
+    `question`/`slug`/`title`. Filtro client-side, complementario al `search`
+    server-side de `fetch_polymarket`.
+
+    - `pattern` vacío/None => devuelve TODOS (sin filtrar).
+    - Regex inválida => devuelve TODOS (no rompe la UI; el caller puede avisar).
+    """
+    if not pattern:
+        return list(payload)
+    try:
+        rx = re.compile(pattern, re.I)
+    except re.error:
+        return list(payload)
+    out = []
+    for mkt in payload:
+        text = " ".join(str(mkt.get(k, "")) for k in ("question", "slug", "title"))
+        if rx.search(text):
+            out.append(mkt)
+    return out
+
+
 def parse_polymarket(payload: list, fetched_at: str) -> list[OddsQuote]:
     """Soporta (1) mercados de 2 outcomes = equipos, y (2) mercados Yes/No
     'Will X beat Y' que se emparejan por partido (clave frozenset{equipos})."""

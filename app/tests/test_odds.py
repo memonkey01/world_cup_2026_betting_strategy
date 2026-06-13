@@ -1,7 +1,7 @@
 """Tests de la capa pura de cuotas (conversores + parsers con fixtures)."""
 from src.odds import (OddsQuote, price_to_decimal, american_to_decimal,
                       implied_prob, normalize_es, parse_polymarket, parse_codere,
-                      _parse_versus, detect_source)
+                      _parse_versus, detect_source, select_markets)
 
 
 def test_converters():
@@ -98,3 +98,18 @@ def test_detect_source():
     assert detect_source("https://polymarket.com/event/world-cup") == "polymarket"
     assert detect_source("https://www.espn.com/soccer") is None
     assert detect_source("") is None
+
+
+def test_select_markets_regex():
+    payload = [
+        {"question": "Argentina vs France"},
+        {"question": "Will Brazil win the World Cup?"},
+        {"slug": "mexico-vs-canada-2026"},
+    ]
+    assert len(select_markets(payload, None)) == 3      # sin patrón -> todos
+    assert len(select_markets(payload, "")) == 3
+    out = select_markets(payload, r"argentina|mexico")  # casa question y slug
+    assert len(out) == 2
+    assert {m.get("question", m.get("slug")) for m in out} == {
+        "Argentina vs France", "mexico-vs-canada-2026"}
+    assert select_markets(payload, "[bad(") == payload  # regex inválida -> todos
