@@ -122,13 +122,17 @@ concuerdan.
   de Elo, distribución bayesiana, calibración y evolución combinada. Persiste la
   evolución (`RatingSnapshot`) tras cada corrida y permite **subir un ranking FIFA**
   en JSON.
-- **🔴 Mundial en vivo:** scrapea ESPN, guarda **todo el calendario** (finalizados
-  + programados) en la DB, lo muestra como vista tipo calendario y recomienda
-  **lado + stake** por partido programado usando la **estrategia activa** fijada en
-  el laboratorio (con fallback a los botones de sizing si no hay ninguna), y la
-  **cuota real** por partido según la fuente elegida (Polymarket por defecto /
-  Codere / cuota fija). Tiene un toggle **"Ignorar estrategia activa"** para volver
-  a los controles manuales. Necesita red; sin calendario en la DB muestra un aviso.
+- **🔴 Mundial en vivo:** scrapea ESPN y guarda **todo el calendario** (finalizados
+  + programados) en la DB. Organizada en **3 tabs**:
+  - **📅 Calendario** — partidos por fecha con su estado (info).
+  - **💱 Cuotas** — hub de cuotas: pega una **URL** (detecta Codere/Polymarket por
+    dominio), ajusta el query de Polymarket y pulsa **"Actualizar solo cuotas"**
+    (busca al instante, independiente del scrape de calendario); tabla comparativa
+    Codere vs Polymarket vs modelo 2026 (con "valor").
+  - **🎯 Recomendaciones** — lado + stake por partido usando la **estrategia activa**
+    (con toggle **"Ignorar estrategia activa"**) y la **cuota real** de la fuente
+    elegida.
+  Necesita red; sin calendario en la DB muestra un aviso.
 
 > ⚠️ Los selectores de Codere y la forma de los mercados de Polymarket son
 > *best-effort* — pueden requerir ajuste contra la red real en el primer scrape.
@@ -140,12 +144,11 @@ en vivo recomienda 2026 con esa estrategia activa.
   con bet sizing dinámico y meta-estrategia configurable. Compara *apostar a todos*
   vs *solo Bayes > umbral*, y **barre las 18 combinaciones** (sizing × criterio ×
   filtro) rankeándolas por **yield**; permite **fijar la ganadora** como estrategia
-  activa en la DB. Incluye un panel **"Cuotas reales"** que scrapea Codere
-  (Playwright) + Polymarket (API) con caché 24h y las compara con la prob. de un
-  modelo entrenado con los **finalizados 2026**. El parser de Polymarket soporta
-  mercados de 2 outcomes y mercados Yes/No "Will X beat Y" (emparejados por partido).
+  activa en la DB. (La gestión de cuotas reales Codere/Polymarket vive ahora en la
+  tab **💱 Cuotas** de la página *Mundial en vivo*; el parser de Polymarket soporta
+  mercados de 2 outcomes y mercados Yes/No "Will X beat Y" emparejados por partido.)
 - **🗄️ Datos:** explorador read-only de la DB para validar los modelos — por tabla
-  (Teams / Tournaments / Matches / RatingSnapshots) muestra nº de filas, esquema y
-  datos, con filtro por torneo.
+  (Teams / Tournaments / Matches / RatingSnapshots / Strategies / Odds) muestra nº de
+  filas, esquema y datos, con filtro por torneo.
 
 Backtest educativo con cuotas sintéticas fijas, no consejo de apuestas.
