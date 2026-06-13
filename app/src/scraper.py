@@ -28,6 +28,42 @@ ESPN_SCOREBOARD = (
 )
 
 
+# Mapa ESPN displayName -> nombre canónico interno (coincide con FIFA snapshot).
+ESPN_NAME_MAP = {
+    "United States": "USA",
+    "IR Iran": "Iran",
+    "Iran": "Iran",
+    "South Korea": "Korea Republic",
+    "Korea Republic": "Korea Republic",
+    "Republic of Korea": "Korea Republic",
+    "Saudi Arabia": "Saudi Arabia",
+}
+
+
+def normalize_team(name: str) -> str:
+    """Normaliza el nombre de ESPN al nombre canónico del proyecto."""
+    n = (name or "").strip()
+    return ESPN_NAME_MAP.get(n, n)
+
+
+def normalize_stage(raw: str | None) -> str:
+    """Mapea etiquetas de fase de ESPN a STAGE_ORDER (default 'group')."""
+    if not raw:
+        return "group"
+    s = raw.lower()
+    if "round of 16" in s or s.strip() == "r16":
+        return "R16"
+    if "quarter" in s:
+        return "QF"
+    if "semi" in s:
+        return "SF"
+    if "3rd" in s or "third" in s:
+        return "3rd"
+    if "final" in s:
+        return "final"
+    return "group"
+
+
 @dataclass
 class MatchResult:
     date: str
@@ -37,6 +73,7 @@ class MatchResult:
     home_goals: int
     away_goals: int
     status: str  # "STATUS_FULL_TIME", "STATUS_SCHEDULED", etc.
+    event_id: str | None = None
 
     @property
     def finished(self) -> bool:
@@ -59,12 +96,15 @@ def parse_scoreboard_json(payload: dict) -> list[MatchResult]:
             ag = int(away.get("score", 0))
         except (ValueError, TypeError):
             hg, ag = 0, 0
+        headline = (comp.get("notes", [{}])[0].get("headline")
+                    if comp.get("notes") else None)
         results.append(MatchResult(
             date=event.get("date", "")[:10],
-            stage=comp.get("notes", [{}])[0].get("headline", "group") if comp.get("notes") else "group",
-            home=home.get("team", {}).get("displayName", "?"),
-            away=away.get("team", {}).get("displayName", "?"),
+            stage=normalize_stage(headline),
+            home=normalize_team(home.get("team", {}).get("displayName", "?")),
+            away=normalize_team(away.get("team", {}).get("displayName", "?")),
             home_goals=hg, away_goals=ag, status=status,
+            event_id=str(event.get("id")) if event.get("id") is not None else None,
         ))
     return results
 
