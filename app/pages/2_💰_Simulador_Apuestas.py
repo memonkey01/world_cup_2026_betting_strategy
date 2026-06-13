@@ -238,6 +238,13 @@ with Session(db_engine) as s:
     poly_map = {(o["home"], o["away"]): o for o in latest_odds(s, wc, "polymarket")}
     cod_map = {(o["home"], o["away"]): o for o in latest_odds(s, wc, "codere")}
     calendar = load_calendar(s, wc)
+    finished_2026 = load_matches(s, wc)
+
+# Modelo entrenado con los finalizados 2026 (no con Qatar) para la comparación.
+pipe_live = Pipeline(elo=EloSystem(k=k_factor, use_margin=use_margin))
+pipe_live.seed(FIFA_SNAPSHOT_EXAMPLE)
+pipe_live.bayes.seed_from_elo(pipe_live.initial_elo, strength=prior_strength)
+pipe_live.process_all(finished_2026)
 
 rows = []
 for m in calendar:
@@ -245,7 +252,7 @@ for m in calendar:
         continue
     key = (m["home"], m["away"])
     pm, cd = poly_map.get(key), cod_map.get(key)
-    rec = pipe.prematch_rec(m["home"], m["away"])
+    rec = pipe_live.prematch_rec(m["home"], m["away"])
     rows.append({
         "partido": f'{m["home"]} vs {m["away"]}',
         "modelo P(home)": round(rec["p_home"], 3),
@@ -256,8 +263,8 @@ for m in calendar:
         "valor vs Poly": round(rec["p_home"] - pm["home_prob"], 3) if pm else None,
     })
 if rows:
-    st.caption("«modelo P(home)» usa los ratings actuales del pipeline (entrenado "
-               "con Qatar en esta página). «valor» = prob. modelo − prob. implícita.")
+    st.caption("«modelo P(home)» usa un pipe entrenado con los partidos 2026 ya "
+               "finalizados (de la DB). «valor» = prob. modelo − prob. implícita.")
     st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True,
                  height=360)
 else:
