@@ -1,7 +1,7 @@
 """Tests de la capa pura de cuotas (conversores + parsers con fixtures)."""
 from src.odds import (OddsQuote, price_to_decimal, american_to_decimal,
                       implied_prob, normalize_es, parse_polymarket, parse_codere,
-                      _parse_versus)
+                      _parse_versus, detect_source)
 
 
 def test_converters():
@@ -91,3 +91,10 @@ def test_parse_polymarket_yesno_unpaired_ignored():
     one = [{"question": "Will Argentina beat France?",
             "outcomes": "[\"Yes\", \"No\"]", "outcomePrices": "[\"0.6\", \"0.4\"]"}]
     assert parse_polymarket(one, "2026-06-13T08:00:00") == []
+
+
+def test_detect_source():
+    assert detect_source("https://www.codere.mx/apuestas/futbol") == "codere"
+    assert detect_source("https://polymarket.com/event/world-cup") == "polymarket"
+    assert detect_source("https://www.espn.com/soccer") is None
+    assert detect_source("") is None

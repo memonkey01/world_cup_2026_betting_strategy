@@ -53,6 +53,16 @@ def normalize_es(name: str) -> str:
     return normalize_team(ES_NAME_MAP.get(n, n))
 
 
+def detect_source(url: str) -> str | None:
+    """Detecta la fuente de cuotas por dominio: 'codere' | 'polymarket' | None."""
+    u = (url or "").lower()
+    if "codere" in u:
+        return "codere"
+    if "polymarket" in u:
+        return "polymarket"
+    return None
+
+
 def _quote(source, home, away, home_dec, away_dec, draw_dec, fetched_at) -> OddsQuote:
     return OddsQuote(
         source=source, home=home, away=away,
