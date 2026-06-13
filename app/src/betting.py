@@ -119,3 +119,23 @@ def simulate(match_log: list[dict], params: BetParams) -> dict:
         "curve": curve,
         "bets": bets,
     }
+
+
+def recommend_bet(rec: dict, bankroll: float, params: BetParams) -> dict:
+    """Recomendación para UN partido próximo (rec sin resultado).
+    Aplica pick_side + filtros (warm-up, umbral Bayes) + stake_amount."""
+    side, p_pick, bayes_pick, match_no = pick_side(
+        rec, params.side_criterion, params.blend_weight)
+    skip_warmup = match_no < params.start_match_no
+    filtered_out = params.use_bayes_filter and bayes_pick < params.bayes_threshold
+    if skip_warmup or filtered_out:
+        stake = 0.0
+    else:
+        stake = min(stake_amount(params, bankroll, p_pick), bankroll)
+    return {
+        "side": side, "pick": rec[side],
+        "p_pick": p_pick, "bayes_pick": bayes_pick, "match_no": match_no,
+        "stake": stake,
+        "skip_warmup": skip_warmup, "filtered_out": filtered_out,
+        "bet": stake > 0,
+    }

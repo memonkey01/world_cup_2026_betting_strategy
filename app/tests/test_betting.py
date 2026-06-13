@@ -1,5 +1,5 @@
 """Tests del motor puro de apuestas."""
-from src.betting import BetParams, pick_side, stake_amount, simulate
+from src.betting import BetParams, pick_side, stake_amount, simulate, recommend_bet
 
 
 def rec(home="A", away="B", p_home=0.7, bayes_home=0.6, bayes_away=0.4,
@@ -110,3 +110,42 @@ def test_simulate_stake_never_exceeds_bankroll():
     # base_fraction 2.0 pediría 200 pero el bankroll es 100 -> apuesta 100 y pierde
     assert abs(out["bankroll_final"] - 0.0) < 1e-6
     assert abs(out["total_staked"] - 100.0) < 1e-6
+
+
+def prec(home="A", away="B", p_home=0.7, bayes_home=0.6, bayes_away=0.4,
+         home_match_no=2, away_match_no=2):
+    """rec pre-partido (sin resultado) para recommend_bet."""
+    return {"home": home, "away": away, "p_home": p_home,
+            "bayes_home": bayes_home, "bayes_away": bayes_away,
+            "home_match_no": home_match_no, "away_match_no": away_match_no}
+
+
+def test_recommend_bet_places_bet():
+    p = BetParams(sizing="flat", base_fraction=0.10, start_match_no=2,
+                  side_criterion="elo")
+    out = recommend_bet(prec(p_home=0.7), 1000.0, p)
+    assert out["bet"] is True
+    assert out["side"] == "home" and out["pick"] == "A"
+    assert abs(out["stake"] - 100.0) < 1e-9
+    assert out["skip_warmup"] is False and out["filtered_out"] is False
+
+
+def test_recommend_bet_skips_warmup():
+    p = BetParams(sizing="flat", base_fraction=0.10, start_match_no=2)
+    out = recommend_bet(prec(p_home=0.7, home_match_no=1, away_match_no=1),
+                        1000.0, p)
+    assert out["skip_warmup"] is True
+    assert out["bet"] is False and out["stake"] == 0.0
+
+
+def test_recommend_bet_bayes_filter():
+    p = BetParams(sizing="flat", base_fraction=0.10, start_match_no=2,
+                  side_criterion="elo", use_bayes_filter=True, bayes_threshold=0.5)
+    out = recommend_bet(prec(p_home=0.7, bayes_home=0.40), 1000.0, p)
+    assert out["filtered_out"] is True and out["bet"] is False
+
+
+def test_recommend_bet_stake_capped_by_bankroll():
+    p = BetParams(sizing="flat", base_fraction=2.0, start_match_no=2)
+    out = recommend_bet(prec(p_home=0.7), 100.0, p)
+    assert abs(out["stake"] - 100.0) < 1e-9  # no excede el bankroll
