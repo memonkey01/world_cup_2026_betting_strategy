@@ -97,7 +97,8 @@ src/pipeline.py       # orquestador Elo+Bayes + snapshots + match_log pre-partid
 src/models.py         # modelos SQLModel: Team, Tournament, Match, RatingSnapshot
 src/db.py             # engine SQLite, init_db, sesiones
 src/ingest.py         # pegamento scraper ↔ DB ↔ pipeline (DB = fuente de verdad)
-src/betting.py        # motor puro de apuestas (BetParams, simulate, recommend_bet)
+src/betting.py        # motor puro de apuestas (BetParams, simulate, recommend_bet, sweep_strategies)
+src/strategies.py     # estrategia activa en la DB (save/load, Strategy<->BetParams)
 src/dbview.py         # inspección read-only de la DB (table_schema, table_rows)
 ui_common.py          # controles de sidebar compartidos entre páginas (session_state)
 app.py                # 📊 Backtest (Qatar) — monitor Elo/Bayes
@@ -119,12 +120,17 @@ concuerdan.
   de Elo, distribución bayesiana, calibración y evolución combinada.
 - **🔴 Mundial en vivo:** scrapea ESPN, guarda **todo el calendario** (finalizados
   + programados) en la DB, lo muestra como vista tipo calendario y recomienda
-  **lado + stake** por partido programado. El sizing se elige con botones
-  (Flat / Confianza / Kelly). Necesita red; sin calendario en la DB muestra un aviso.
-- **💰 Simulador de apuestas:** backtest al ganador sobre Qatar 2022 con bet sizing
-  dinámico y meta-estrategia configurable (criterio de lado Elo / Bayes / mezcla).
-  Compara *apostar a todos* vs *solo Bayes > umbral* con KPIs (ROI, yield, drawdown)
-  y curvas de bankroll.
+  **lado + stake** por partido programado usando la **estrategia activa** fijada en
+  el laboratorio (con fallback a los botones de sizing si no hay ninguna). Necesita
+  red; sin calendario en la DB muestra un aviso.
+
+**Flujo:** Laboratorio (Qatar) → barrer y **fijar la mejor estrategia** → la página
+en vivo recomienda 2026 con esa estrategia activa.
+- **💰 Simulador de apuestas (laboratorio):** backtest al ganador sobre Qatar 2022
+  con bet sizing dinámico y meta-estrategia configurable. Compara *apostar a todos*
+  vs *solo Bayes > umbral*, y **barre las 18 combinaciones** (sizing × criterio ×
+  filtro) rankeándolas por **yield**; permite **fijar la ganadora** como estrategia
+  activa en la DB.
 - **🗄️ Datos:** explorador read-only de la DB para validar los modelos — por tabla
   (Teams / Tournaments / Matches / RatingSnapshots) muestra nº de filas, esquema y
   datos, con filtro por torneo.
