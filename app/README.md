@@ -119,13 +119,16 @@ vía `session_state` (helpers en `ui_common.py`), así backtest, vivo y simulado
 concuerdan.
 
 - **📊 Backtest (app.py):** monitor Elo/Bayes sobre Qatar 2022 — tabla, evolución
-  de Elo, distribución bayesiana, calibración y evolución combinada.
+  de Elo, distribución bayesiana, calibración y evolución combinada. Persiste la
+  evolución (`RatingSnapshot`) tras cada corrida y permite **subir un ranking FIFA**
+  en JSON.
 - **🔴 Mundial en vivo:** scrapea ESPN, guarda **todo el calendario** (finalizados
   + programados) en la DB, lo muestra como vista tipo calendario y recomienda
   **lado + stake** por partido programado usando la **estrategia activa** fijada en
   el laboratorio (con fallback a los botones de sizing si no hay ninguna), y la
   **cuota real** por partido según la fuente elegida (Polymarket por defecto /
-  Codere / cuota fija). Necesita red; sin calendario en la DB muestra un aviso.
+  Codere / cuota fija). Tiene un toggle **"Ignorar estrategia activa"** para volver
+  a los controles manuales. Necesita red; sin calendario en la DB muestra un aviso.
 
 > ⚠️ Los selectores de Codere y la forma de los mercados de Polymarket son
 > *best-effort* — pueden requerir ajuste contra la red real en el primer scrape.
@@ -138,7 +141,9 @@ en vivo recomienda 2026 con esa estrategia activa.
   vs *solo Bayes > umbral*, y **barre las 18 combinaciones** (sizing × criterio ×
   filtro) rankeándolas por **yield**; permite **fijar la ganadora** como estrategia
   activa en la DB. Incluye un panel **"Cuotas reales"** que scrapea Codere
-  (Playwright) + Polymarket (API) con caché 24h y las compara con la prob. del modelo.
+  (Playwright) + Polymarket (API) con caché 24h y las compara con la prob. de un
+  modelo entrenado con los **finalizados 2026**. El parser de Polymarket soporta
+  mercados de 2 outcomes y mercados Yes/No "Will X beat Y" (emparejados por partido).
 - **🗄️ Datos:** explorador read-only de la DB para validar los modelos — por tabla
   (Teams / Tournaments / Matches / RatingSnapshots) muestra nº de filas, esquema y
   datos, con filtro por torneo.
