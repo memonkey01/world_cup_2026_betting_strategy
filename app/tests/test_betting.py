@@ -149,3 +149,29 @@ def test_recommend_bet_stake_capped_by_bankroll():
     p = BetParams(sizing="flat", base_fraction=2.0, start_match_no=2)
     out = recommend_bet(prec(p_home=0.7), 100.0, p)
     assert abs(out["stake"] - 100.0) < 1e-9  # no excede el bankroll
+
+
+def test_sweep_strategies_ranks_by_yield():
+    from src.betting import sweep_strategies
+    # log de 6 partidos, equipos ya con match_no>=2 (sin warm-up)
+    log = [rec(home="A", away="B", p_home=0.7,
+               bayes_home=0.6, bayes_away=0.4,
+               home_win=(i % 2 == 0), away_win=(i % 2 == 1),
+               home_match_no=2 + i, away_match_no=2 + i)
+           for i in range(6)]
+    base = BetParams(bankroll0=1000.0, odds=2.0, base_fraction=0.1,
+                     kelly_fraction=0.25, start_match_no=2,
+                     blend_weight=0.5, bayes_threshold=0.5)
+    rows = sweep_strategies(log, base)
+    # 3 sizing x 3 criterio x 2 filtro = 18 combinaciones
+    assert len(rows) == 18
+    # ordenadas por yield desc
+    ys = [r["metrics"]["yield"] for r in rows]
+    assert ys == sorted(ys, reverse=True)
+    # cada fila trae los params (BetParams) y las claves del combo
+    top = rows[0]
+    assert isinstance(top["params"], BetParams)
+    assert top["sizing"] in ("flat", "confidence", "kelly")
+    assert top["side_criterion"] in ("elo", "bayes", "blend")
+    assert top["use_bayes_filter"] in (True, False)
+    assert "curve" not in top["metrics"]  # métricas livianas (sin curva/apuestas)

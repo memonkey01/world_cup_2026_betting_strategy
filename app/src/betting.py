@@ -6,7 +6,7 @@ bankroll según BetParams. La meta-estrategia es configurable: el criterio de
 selección de lado (elo|bayes|blend), el filtro de Bayes, el sizing y la cuota.
 """
 from __future__ import annotations
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 
 @dataclass
@@ -139,3 +139,33 @@ def recommend_bet(rec: dict, bankroll: float, params: BetParams) -> dict:
         "skip_warmup": skip_warmup, "filtered_out": filtered_out,
         "bet": stake > 0,
     }
+
+
+SWEEP_SIZINGS = ("flat", "confidence", "kelly")
+SWEEP_CRITERIA = ("elo", "bayes", "blend")
+SWEEP_FILTERS = (False, True)
+
+
+def sweep_strategies(match_log: list[dict], base: BetParams) -> list[dict]:
+    """Barre sizing x side_criterion x use_bayes_filter (18 combos) manteniendo
+    el resto de `base` fijo. Devuelve filas {sizing, side_criterion,
+    use_bayes_filter, params, metrics} ordenadas por yield desc (luego roi desc)."""
+    rows = []
+    for sizing in SWEEP_SIZINGS:
+        for criterion in SWEEP_CRITERIA:
+            for use_filter in SWEEP_FILTERS:
+                params = replace(base, sizing=sizing, side_criterion=criterion,
+                                 use_bayes_filter=use_filter)
+                res = simulate(match_log, params)
+                metrics = {k: v for k, v in res.items()
+                           if k not in ("curve", "bets")}
+                rows.append({
+                    "sizing": sizing,
+                    "side_criterion": criterion,
+                    "use_bayes_filter": use_filter,
+                    "params": params,
+                    "metrics": metrics,
+                })
+    rows.sort(key=lambda r: (r["metrics"]["yield"], r["metrics"]["roi"]),
+              reverse=True)
+    return rows
