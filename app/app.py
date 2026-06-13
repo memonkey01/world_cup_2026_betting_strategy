@@ -1,18 +1,13 @@
 """
-Monitor Streamlit del sistema Elo + Bayes del Mundial.
+Página Backtest del sistema Elo + Bayes del Mundial (Qatar 2022, offline).
 
-Correr:
-    streamlit run app.py
+Correr (desde app/):
+    uv run streamlit run app.py
 
-Modos:
-  - "Backtest Qatar 2022": usa el fixture incluido (offline, sin red).
-  - "En vivo 2026": scrapea ESPN via Playwright y actualiza al cerrar jornada.
-
-Vistas:
-  - Tabla combinada (Elo rating + media bayesiana + intervalo de credibilidad)
-  - Evolucion de Elo por jornada (line chart)
-  - Distribucion bayesiana por equipo (media + intervalo)
-  - Calibracion: Brier, LogLoss y curva de fiabilidad
+Vistas: tabla combinada, evolución de Elo, distribución bayesiana, calibración
+y evolución combinada Elo+Bayes. La página "Mundial en vivo" y el "Simulador de
+apuestas" están en pages/. Los parámetros del modelo se comparten entre páginas
+vía session_state (ver ui_common).
 """
 
 from __future__ import annotations
@@ -26,10 +21,10 @@ from src.elo import EloSystem
 from src.fifa_seed import FIFA_SNAPSHOT_EXAMPLE
 from src.db import get_engine, init_db
 from src.models import Match, Tournament
-from src.ingest import ingest_qatar_backtest, ingest_live, load_matches
-from src.scraper import fetch_via_playwright, fetch_via_requests
+from src.ingest import ingest_qatar_backtest, load_matches
+from ui_common import model_controls
 
-st.set_page_config(page_title="Mundial Elo + Bayes", layout="wide")
+st.set_page_config(page_title="Backtest — Mundial Elo+Bayes", layout="wide")
 
 # ---- estilo PyPro-ish dark tech ----
 st.markdown("""
@@ -40,7 +35,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-st.title("⚽ Mundial — Elo + Bayes Monitor")
+st.title("📊 Backtest — Mundial (Qatar 2022)")
 
 # Panel explicativo: cómo funciona el sistema completo (visible en la UI).
 with st.expander("ℹ️ ¿Cómo funciona este monitor?", expanded=False):
@@ -61,44 +56,15 @@ El sistema procesa los partidos **en orden** y mantiene dos modelos en paralelo:
 4. **Calibración.** La probabilidad que el Elo emite *antes* de cada partido se
    compara con el resultado real → **Brier**, **LogLoss** y curva de fiabilidad.
 
-**Datos:** la base SQLite es la fuente de verdad. El *backtest* siembra Qatar
-2022 (offline); *en vivo* scrapea ESPN y persiste los partidos finalizados.
+**Datos:** la base SQLite es la fuente de verdad. Esta página siembra Qatar 2022
+(offline) y lee de la DB. Para datos en vivo usa la página **Mundial en vivo**.
 
 Mueve los controles de la izquierda y todo se recalcula al instante.
 """)
 
-# ----------------------------------------------------------------------
-# Sidebar: configuracion
-# Todos los controles que el usuario mueve viven aquí. Cada cambio re-ejecuta
-# el script completo de arriba a abajo (modelo de ejecución de Streamlit), así
-# que el pipeline se recalcula con los nuevos parámetros en cada interacción.
-# ----------------------------------------------------------------------
-with st.sidebar:
-    st.header("Configuración")
-    # Backtest = datos históricos offline; En vivo = scrape de ESPN.
-    mode = st.radio("Modo", ["Backtest Qatar 2022", "En vivo 2026"])
-    # K controla cuánto se mueve el Elo por partido (más alto = más reactivo).
-    k_factor = st.slider("Factor K (Elo)", 10, 80, 40, 5)
-    # Fuerza del prior = tamaño de muestra equivalente del prior Beta del Bayes
-    # (más alto = el prior pesa más y los resultados lo mueven menos).
-    prior_strength = st.slider("Fuerza del prior Bayes", 1.0, 12.0, 4.0, 1.0)
-    # Amplifica K cuando la goleada es amplia (estilo FiveThirtyEight).
-    use_margin = st.checkbox("Multiplicador por margen de gol", value=True)
-
-    # De dónde sale el Elo inicial: el snapshot de ejemplo o un JSON subido.
-    fifa_source = st.radio("Ranking FIFA inicial", ["Snapshot incluido", "Subir JSON"])
-    fifa_points = FIFA_SNAPSHOT_EXAMPLE
-    if fifa_source == "Subir JSON":
-        up = st.file_uploader("JSON {equipo: puntos}", type="json")
-        if up:
-            import json
-            fifa_points = {k: float(v) for k, v in json.load(up).items()}
-
-    # Controles que solo aplican al modo en vivo (rango de fechas + scraper).
-    if mode == "En vivo 2026":
-        date_range = st.text_input("Rango de fechas ESPN", "20260611-20260710")
-        scraper_engine = st.selectbox("Scraper", ["Playwright", "requests (fallback)"])
-        run_scrape = st.button("Actualizar jornada (scrape ESPN)")
+# Parámetros del modelo (compartidos entre páginas vía session_state).
+k_factor, prior_strength, use_margin = model_controls()
+fifa_points = FIFA_SNAPSHOT_EXAMPLE
 
 
 # ----------------------------------------------------------------------
@@ -110,42 +76,20 @@ def get_db():
     init_db(eng)
     return eng
 
+
 db_engine = get_db()
 
-
-# ----------------------------------------------------------------------
-# Carga de partidos (DB = fuente de verdad)
-# ----------------------------------------------------------------------
-if mode == "Backtest Qatar 2022":
-    with Session(db_engine) as s:
-        t = s.exec(select(Tournament).where(
-            Tournament.name == "Qatar 2022")).first()
-        has_matches = t and s.exec(select(Match).where(
-            Match.tournament_id == t.id)).first()
-        if not has_matches:
-            with st.spinner("Sembrando DB con Qatar 2022…"):
-                t = ingest_qatar_backtest(s, fifa_points=fifa_points,
-                                          prefer_scrape=False)
-        matches = load_matches(s, t)
-else:
-    matches = []
-    if run_scrape:
-        fn = (fetch_via_playwright if scraper_engine == "Playwright"
-              else fetch_via_requests)
-        with st.spinner("Scrapeando ESPN y guardando en DB…"):
-            with Session(db_engine) as s:
-                t = ingest_live(s, date_range, scrape_fn=fn,
-                                fifa_points=fifa_points)
-                matches = load_matches(s, t)
-        st.success(f"{len(matches)} partidos finalizados guardados.")
-    else:
-        with Session(db_engine) as s:
-            t = s.exec(select(Tournament).where(
-                Tournament.name == "World Cup 2026")).first()
-            matches = load_matches(s, t) if t else []
+# Backtest: siembra la DB con Qatar 2022 la primera vez y luego lee de ella.
+with Session(db_engine) as s:
+    t = s.exec(select(Tournament).where(Tournament.name == "Qatar 2022")).first()
+    has_matches = t and s.exec(select(Match).where(Match.tournament_id == t.id)).first()
+    if not has_matches:
+        with st.spinner("Sembrando DB con Qatar 2022…"):
+            t = ingest_qatar_backtest(s, fifa_points=fifa_points, prefer_scrape=False)
+    matches = load_matches(s, t)
 
 if not matches:
-    st.info("Sin partidos cargados todavía. (En vivo: pulsa «Actualizar jornada».)")
+    st.info("Sin partidos en la DB todavía.")
     st.stop()
 
 # ----------------------------------------------------------------------
