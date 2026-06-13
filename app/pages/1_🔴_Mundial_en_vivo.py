@@ -64,10 +64,9 @@ override_active = st.sidebar.checkbox(
     "Ignorar estrategia activa (override manual)", value=False,
     key="live_override")
 
-st.sidebar.header("Cuotas")
-odds_source = st.sidebar.selectbox("Fuente de cuotas (en vivo)",
-                                   ["polymarket", "codere", "cuota fija"],
-                                   key="live_odds_source")
+# La fuente de cuotas se elige en la tab 💱 Cuotas (no en el sidebar): se ve
+# junto a la comparativa y se recuerda en session_state.
+st.session_state.setdefault("live_odds_source", "polymarket")
 
 st.sidebar.header("Scrape ESPN")
 date_range = st.sidebar.text_input("Rango de fechas", "20260611-20260710",
@@ -97,15 +96,11 @@ if run_scrape:
             n = ingest_calendar(s, t, results)
     st.success(f"{len(results)} partidos scrapeados, {n} nuevos guardados en la DB.")
 
-# 2) Leer calendario + finalizados (+ cuotas de la fuente elegida) de la DB
-odds_map: dict = {}
+# 2) Leer calendario + finalizados de la DB (las cuotas se leen por tab)
 with Session(db_engine) as s:
     t = s.exec(select(Tournament).where(Tournament.name == "World Cup 2026")).first()
     calendar = load_calendar(s, t) if t else []
     finished = load_matches(s, t) if t else []
-    if t and odds_source != "cuota fija":
-        odds_map = {(o["home"], o["away"]): o
-                    for o in latest_odds(s, t, odds_source)}
 
 if not calendar:
     st.info("La DB no tiene calendario aún. Pulsa «Actualizar (scrape ESPN)» "
@@ -217,10 +212,25 @@ with tab_odds:
     else:
         st.caption("No hay partidos próximos en el calendario o no hay cuotas todavía.")
 
+    st.divider()
+    st.selectbox(
+        "Fuente de cuotas para las recomendaciones",
+        ["polymarket", "codere", "cuota fija"], key="live_odds_source",
+        help="«cuota fija» usa la cuota decimal de la barra lateral; "
+             "las otras dos usan la cuota real de la fuente elegida.")
+    st.caption("La tab 🎯 Recomendaciones usará esta fuente.")
+
 # ---- Tab Recomendaciones ----
 with tab_rec:
+    odds_source = st.session_state.get("live_odds_source", "polymarket")
+    odds_map: dict = {}
+    if odds_source != "cuota fija":
+        with Session(db_engine) as s:
+            wc = get_or_create_tournament(s, "World Cup 2026", 2026, "live")
+            odds_map = {(o["home"], o["away"]): o
+                        for o in latest_odds(s, wc, odds_source)}
     st.caption("🔵 con apuesta `@ cuota` · ⚪ sin apuesta (warm-up / filtro Bayes). "
-               f"Fuente de cuotas activa: **{odds_source}**.")
+               f"Fuente de cuotas activa: **{odds_source}** (se elige en 💱 Cuotas).")
     rows = []
     for m in calendar:
         if m["status_finished"]:
