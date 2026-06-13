@@ -176,7 +176,12 @@ def parse_polymarket_events(events: list, fetched_at: str) -> list[OddsQuote]:
     Devuelve un OddsQuote por evento con título emparejable (y ambos ganadores)."""
     out: list[OddsQuote] = []
     for ev in events:
-        vs = _parse_versus(ev.get("title", ""))
+        # El título del partido es "X vs. Y"; los sub-eventos añaden sufijos como
+        # " - Exact Score" / " - Halftime Result" / " - More Markets". Los cortamos
+        # para no capturar el sufijo como nombre de equipo (esos sub-eventos no
+        # traen mercados de ganador, así que igual se descartan abajo).
+        title = ev.get("title", "").split(" - ")[0]
+        vs = _parse_versus(title)
         if not vs:
             continue
         raw_home, raw_away = vs[0].lower(), vs[1].lower()

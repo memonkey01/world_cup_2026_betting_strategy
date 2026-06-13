@@ -19,6 +19,15 @@ def test_normalize_es():
     assert normalize_es("Argentina") == "Argentina"
 
 
+def test_normalize_homologa_polymarket():
+    # Variantes de Polymarket -> canónico del calendario (ESPN). Homologación.
+    assert normalize_es("Cabo Verde") == "Cape Verde"
+    assert normalize_es("Côte d'Ivoire") == "Ivory Coast"
+    assert normalize_es("DR Congo") == "Congo DR"
+    assert normalize_es("Bosnia and Herzegovina") == "Bosnia-Herzegovina"
+    assert normalize_es("South Korea") == "Korea Republic"
+
+
 # Polymarket Gamma: un mercado de ganador con dos outcomes (equipos) y precios.
 POLY_PAYLOAD = [
     {
@@ -125,6 +134,26 @@ def test_parse_polymarket_events():
     assert abs(q.home_prob - 0.0605) < 1e-6        # P(Qatar gana)
     assert abs(q.away_prob - 0.815) < 1e-6         # P(Switzerland gana)
     assert q.draw_decimal is not None and abs(q.draw_decimal - 1 / 0.135) < 1e-6
+
+
+def test_parse_polymarket_events_homologa_y_ignora_subeventos():
+    events = [
+        # Partido con nombre que difiere del calendario -> debe homologarse.
+        {"title": "Spain vs. Cabo Verde",
+         "markets": [
+             {"question": "Will Spain win on 2026-06-20?",
+              "outcomes": "[\"Yes\", \"No\"]", "outcomePrices": "[\"0.9\", \"0.1\"]"},
+             {"question": "Will Cabo Verde win on 2026-06-20?",
+              "outcomes": "[\"Yes\", \"No\"]", "outcomePrices": "[\"0.05\", \"0.95\"]"},
+         ]},
+        # Sub-evento con sufijo: no trae mercados de ganador -> se ignora.
+        {"title": "Spain vs. Cabo Verde - Exact Score",
+         "markets": [{"question": "Spain 2-0", "outcomes": "[\"Yes\", \"No\"]",
+                      "outcomePrices": "[\"0.1\", \"0.9\"]"}]},
+    ]
+    quotes = parse_polymarket_events(events, "t")
+    assert len(quotes) == 1
+    assert quotes[0].home == "Spain" and quotes[0].away == "Cape Verde"
 
 
 def test_parse_polymarket_events_skips_non_match():

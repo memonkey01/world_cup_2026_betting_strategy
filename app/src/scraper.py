@@ -39,11 +39,23 @@ ESPN_NAME_MAP = {
     "Saudi Arabia": "Saudi Arabia",
 }
 
+# Variantes de nombre entre fuentes (Polymarket / intl) -> canónico del proyecto.
+# Homologa el calendario (ESPN) con las cuotas: Polymarket usa otras grafías para
+# algunas selecciones. Se aplica en normalize_team, así TODAS las fuentes convergen.
+ALT_NAME_MAP = {
+    "Cabo Verde": "Cape Verde",
+    "Côte d'Ivoire": "Ivory Coast",
+    "Cote d'Ivoire": "Ivory Coast",
+    "DR Congo": "Congo DR",
+    "Bosnia and Herzegovina": "Bosnia-Herzegovina",
+}
+
 
 def normalize_team(name: str) -> str:
-    """Normaliza el nombre de ESPN al nombre canónico del proyecto."""
+    """Normaliza el nombre (ESPN/Polymarket/Codere) al canónico del proyecto."""
     n = (name or "").strip()
-    return ESPN_NAME_MAP.get(n, n)
+    n = ESPN_NAME_MAP.get(n, n)
+    return ALT_NAME_MAP.get(n, n)
 
 
 def normalize_stage(raw: str | None) -> str:

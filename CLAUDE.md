@@ -32,7 +32,7 @@ pipeline Elo/Bayes lee de ella.
 | [app/src/elo.py](app/src/elo.py) | `EloSystem` + `expected_score`, `match_scores`, `margin_multiplier` |
 | [app/src/bayes.py](app/src/bayes.py) | `BetaBelief`, `BayesianLeague` + métricas `brier_score`, `log_loss`, `reliability_bins` |
 | [app/src/fifa_seed.py](app/src/fifa_seed.py) | `fifa_to_elo`, `load_fifa_ranking`, `FIFA_SNAPSHOT_EXAMPLE` |
-| [app/src/scraper.py](app/src/scraper.py) | ESPN scoreboard API vía Playwright; `fetch_via_requests` fallback; `normalize_team`/`normalize_stage` |
+| [app/src/scraper.py](app/src/scraper.py) | ESPN scoreboard API vía Playwright; `fetch_via_requests` fallback; `normalize_team` (`ESPN_NAME_MAP` + `ALT_NAME_MAP` homologa grafías Polymarket/intl)/`normalize_stage` |
 | [app/src/qatar_fixture.py](app/src/qatar_fixture.py) | `QATAR_2022_SAMPLE` — resultados reales para backtest offline / fallback |
 | [app/src/pipeline.py](app/src/pipeline.py) | `Pipeline` — orquesta seed → Elo + Bayes; `snapshots`, `match_log`, `team_evolution`, `prematch_rec` |
 | [app/src/models.py](app/src/models.py) | Modelos SQLModel: `Team`, `Tournament`, `Match` (goles nullable), `RatingSnapshot`, `Strategy`, `Odds` |
@@ -87,6 +87,10 @@ checkbox `guardar`, default = los que casan con el calendario); "💾 Guardar
 seleccionadas" ingesta solo los marcados (`OddsQuote(**d)` → `ingest_odds`). Hay
 un expander "ver eventos crudos" y contadores (crudos→regex→partidos) para
 diagnosticar. Codere tiene su propio botón (URL detectada con `detect_source`).
+La cuota casa con el calendario por `(home, away)`: los nombres de todas las
+fuentes convergen al canónico ESPN vía `normalize_team` (`ALT_NAME_MAP` homologa
+"Cabo Verde"→"Cape Verde", "Côte d'Ivoire"→"Ivory Coast", "DR Congo"→"Congo DR",
+etc.) — validado: 135/135 partidos de Polymarket casan con el calendario 2026.
 Debajo, comparar Codere/Polymarket vs el modelo entrenado con finalizados 2026, y
 **elegir ahí la fuente** que alimenta las recomendaciones (key `live_odds_source`).
 
