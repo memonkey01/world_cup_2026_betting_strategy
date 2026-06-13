@@ -33,3 +33,80 @@ def test_pick_side_blend_respects_weight():
     assert pick_side(r, "blend", 1.0)[0] == "home"
     # w=0.0 -> solo Bayes -> away (0.80 > 0.20)
     assert pick_side(r, "blend", 0.0)[0] == "away"
+
+
+def test_stake_flat():
+    p = BetParams(sizing="flat", base_fraction=0.05)
+    assert abs(stake_amount(p, 1000.0, 0.7) - 50.0) < 1e-9
+
+
+def test_stake_confidence_scales_with_p():
+    p = BetParams(sizing="confidence", base_fraction=0.10)
+    # conf = clip((0.75-0.5)*2,0,1) = 0.5 -> 0.10*1000*0.5 = 50
+    assert abs(stake_amount(p, 1000.0, 0.75) - 50.0) < 1e-9
+    # p<=0.5 -> conf 0 -> stake 0
+    assert stake_amount(p, 1000.0, 0.5) == 0.0
+
+
+def test_stake_kelly_zero_without_edge():
+    p = BetParams(sizing="kelly", odds=2.0, kelly_fraction=1.0)
+    # odds 2.0 -> b=1 -> edge requiere p>0.5; p=0.5 -> f*=0
+    assert stake_amount(p, 1000.0, 0.5) == 0.0
+    assert stake_amount(p, 1000.0, 0.4) == 0.0
+
+
+def test_stake_kelly_positive_with_edge():
+    p = BetParams(sizing="kelly", odds=2.0, kelly_fraction=1.0)
+    # b=1, p=0.7 -> f* = (1*0.7 - 0.3)/1 = 0.4 -> 0.4*1000 = 400
+    assert abs(stake_amount(p, 1000.0, 0.7) - 400.0) < 1e-9
+    # con kelly_fraction 0.25 -> 100
+    p2 = BetParams(sizing="kelly", odds=2.0, kelly_fraction=0.25)
+    assert abs(stake_amount(p2, 1000.0, 0.7) - 100.0) < 1e-9
+
+
+def test_simulate_settlement_and_skips():
+    log = [
+        rec(home="A", away="B", p_home=0.7, home_win=True, away_win=False,
+            home_match_no=1, away_match_no=1),   # jornada 1 -> se salta
+        rec(home="A", away="C", p_home=0.7, home_win=True, away_win=False,
+            home_match_no=2, away_match_no=1),   # apuesta a A (gana)
+        rec(home="A", away="D", p_home=0.7, home_win=False, away_win=True,
+            home_match_no=3, away_match_no=1),   # apuesta a A (pierde)
+    ]
+    p = BetParams(bankroll0=1000.0, odds=2.0, sizing="flat", base_fraction=0.10,
+                  start_match_no=2, side_criterion="elo", use_bayes_filter=False)
+    out = simulate(log, p)
+    # 2 apuestas (la jornada 1 se salta). Apuesta1: 100 -> +100 (1100).
+    # Apuesta2: 110 (10% de 1100) -> -110 (990).
+    assert out["n_bets"] == 2
+    assert out["wins"] == 1
+    assert abs(out["bankroll_final"] - 990.0) < 1e-6
+    assert abs(out["total_staked"] - 210.0) < 1e-6
+    assert len(out["curve"]) == out["n_bets"] + 1  # incluye punto inicial
+
+
+def test_simulate_bayes_filter_reduces_bets():
+    log = [
+        rec(home="A", away="B", p_home=0.7, bayes_home=0.40,
+            home_win=True, away_win=False, home_match_no=2, away_match_no=2),
+        rec(home="A", away="C", p_home=0.7, bayes_home=0.65,
+            home_win=True, away_win=False, home_match_no=3, away_match_no=2),
+    ]
+    base = dict(bankroll0=1000.0, odds=2.0, sizing="flat", base_fraction=0.10,
+                start_match_no=2, side_criterion="elo")
+    no_filter = simulate(log, BetParams(use_bayes_filter=False, **base))
+    filtered = simulate(log, BetParams(use_bayes_filter=True,
+                                       bayes_threshold=0.5, **base))
+    assert no_filter["n_bets"] == 2
+    assert filtered["n_bets"] == 1   # solo el segundo (bayes 0.65 > 0.5)
+
+
+def test_simulate_stake_never_exceeds_bankroll():
+    log = [rec(home="A", away="B", p_home=0.99, home_win=False, away_win=True,
+               home_match_no=2, away_match_no=2)]
+    p = BetParams(bankroll0=100.0, odds=2.0, sizing="flat", base_fraction=2.0,
+                  start_match_no=2)
+    out = simulate(log, p)
+    # base_fraction 2.0 pediría 200 pero el bankroll es 100 -> apuesta 100 y pierde
+    assert abs(out["bankroll_final"] - 0.0) < 1e-6
+    assert abs(out["total_staked"] - 100.0) < 1e-6
