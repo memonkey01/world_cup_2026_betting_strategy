@@ -24,6 +24,10 @@ pipeline Elo/Bayes lee de ella.
 4. **Calibración.** Las probabilidades que el Elo emite *antes* de cada partido
    se contrastan contra resultados con Brier, LogLoss y curva de fiabilidad
    (también en [app/bayes.py](app/bayes.py)).
+5. **TrueSkill (alternativa).** Modelo bayesiano de habilidad `N(μ,σ²)` por equipo
+   (lib [trueskill](https://trueskill.org)); μ sembrada desde Elo, empate nativo,
+   rating conservador μ−3σ. Es un **3er modelo** en el monitor y un **criterio de
+   lado** alternativo en la estrategia. Ver [app/src/trueskill_model.py](app/src/trueskill_model.py).
 
 ## Arquitectura
 
@@ -31,14 +35,15 @@ pipeline Elo/Bayes lee de ella.
 |---------|-----|
 | [app/src/elo.py](app/src/elo.py) | `EloSystem` + `expected_score`, `match_scores`, `margin_multiplier` |
 | [app/src/bayes.py](app/src/bayes.py) | `BetaBelief`, `BayesianLeague` + métricas `brier_score`, `log_loss`, `reliability_bins` |
+| [app/src/trueskill_model.py](app/src/trueskill_model.py) | `TrueSkillSystem` (lib `trueskill`): rating bayesiano `N(μ,σ²)`, `seed_from_elo`, `win_probability`, `expose`=μ−3σ, empate nativo |
 | [app/src/fifa_seed.py](app/src/fifa_seed.py) | `fifa_to_elo`, `load_fifa_ranking`, `FIFA_SNAPSHOT_EXAMPLE` |
 | [app/src/scraper.py](app/src/scraper.py) | ESPN scoreboard API vía Playwright; `fetch_via_requests` fallback; `normalize_team` (`ESPN_NAME_MAP` + `ALT_NAME_MAP` homologa grafías Polymarket/intl)/`normalize_stage` |
 | [app/src/qatar_fixture.py](app/src/qatar_fixture.py) | `QATAR_2022_SAMPLE` — resultados reales para backtest offline / fallback |
-| [app/src/pipeline.py](app/src/pipeline.py) | `Pipeline` — orquesta seed → Elo + Bayes; `snapshots`, `match_log`, `team_evolution`, `prematch_rec` |
+| [app/src/pipeline.py](app/src/pipeline.py) | `Pipeline` — orquesta seed → Elo + Bayes + TrueSkill en paralelo; `snapshots`, `match_log` (con `ts_home/ts_away`), `team_evolution`, `prematch_rec` |
 | [app/src/models.py](app/src/models.py) | Modelos SQLModel: `Team`, `Tournament`, `Match` (goles nullable), `RatingSnapshot`, `Strategy`, `Odds` |
 | [app/src/db.py](app/src/db.py) | Engine SQLite, `init_db`, sesiones (`:memory:` para tests) |
 | [app/src/ingest.py](app/src/ingest.py) | scraper ↔ DB ↔ pipeline: `ingest_qatar_backtest`, `ingest_live`, `ingest_calendar`, `load_matches` (finalizados), `load_calendar` (todos), `persist_snapshots`, `clear_snapshots` |
-| [app/src/betting.py](app/src/betting.py) | Motor puro de apuestas: `BetParams`, `pick_side`, `stake_amount`, `simulate`, `recommend_bet`, `sweep_strategies` |
+| [app/src/betting.py](app/src/betting.py) | Motor puro de apuestas: `BetParams`, `pick_side` (criterios elo/bayes/blend/**trueskill**), `stake_amount`, `simulate`, `recommend_bet`, `sweep_strategies` (24 combos) |
 | [app/src/strategies.py](app/src/strategies.py) | Estrategia activa en la DB: `save_active_strategy`, `load_active_strategy`, `strategy_to_params` |
 | [app/src/odds.py](app/src/odds.py) | Capa de cuotas: `OddsQuote`, conversores, `detect_source`, `select_markets` (filtro regex), `parse_polymarket_events`/`parse_polymarket`/`parse_codere` (puro), `book_overround`/`compare_books` (analítica Poly vs Codere) + `fetch_*` (red, Polymarket por tag/eventos paginados) |
 | [app/src/odds_store.py](app/src/odds_store.py) | Persistencia de cuotas: `ingest_odds`, `latest_odds`, `latest_scrape_iso` |

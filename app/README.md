@@ -13,6 +13,10 @@ Playwright y monitor en Streamlit que se actualiza al cerrar cada jornada.
 3. **Bayes binario.** Cada equipo tiene `θ ~ Beta(a,b)` (prior anclado al Elo).
    Cada partido es un Bernoulli con empate = 0.5 éxito → posterior conjugado.
    Da media + intervalo de credibilidad. `src/bayes.py`.
+3b. **TrueSkill (alternativa).** Habilidad bayesiana `N(μ,σ²)` por equipo (lib
+   [trueskill](https://trueskill.org)); μ sembrada desde el Elo, empate nativo,
+   rating conservador μ−3σ. Tercer modelo en el monitor y criterio de lado
+   alternativo en la estrategia. `src/trueskill_model.py`.
 4. **Validación de la distribución.** Las probabilidades del Elo (emitidas
    *antes* de cada partido) se contrastan contra resultados con Brier, LogLoss
    y curva de fiabilidad. `src/bayes.py` + `src/pipeline.py`.
@@ -90,6 +94,7 @@ pipeline de scraping y la misma capa de calibración.
 ```
 src/elo.py            # Elo + empates + margen de gol
 src/bayes.py          # Beta-Bernoulli + métricas de calibración
+src/trueskill_model.py # TrueSkill (μ,σ): rating bayesiano alternativo + win prob
 src/fifa_seed.py      # FIFA → Elo inicial
 src/scraper.py        # ESPN vía Playwright / requests + normalización de nombres/fases
 src/qatar_fixture.py  # resultados reales Qatar 2022 (offline / fallback)

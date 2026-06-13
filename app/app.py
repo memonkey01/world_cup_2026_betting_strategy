@@ -188,10 +188,28 @@ with st.expander("② Modelo Bayes — fuerza latente (Beta-Bernoulli)", expande
              r"\text{LogLoss} = -\frac{1}{N}\sum_i \big[o_i \ln p_i + "
              r"(1-o_i)\ln(1-p_i)\big]")
 
-with st.expander("③ Estrategia de apuesta (la activa)", expanded=True):
+with st.expander("③ Modelo TrueSkill — habilidad bayesiana (alternativa a Elo)",
+                 expanded=False):
+    st.markdown("[TrueSkill](https://trueskill.org) modela la habilidad de cada "
+                r"equipo como una gaussiana $\theta \sim \mathcal{N}(\mu, \sigma^2)$ "
+                "($\\mu$ = habilidad, $\\sigma$ = incertidumbre). Sembramos $\\mu$ "
+                "desde el Elo inicial:")
+    st.latex(r"\mu_0 = 25 + \frac{R_0 - 1500}{40}")
+    st.markdown("Tras cada partido actualiza $(\\mu,\\sigma)$ por inferencia "
+                "bayesiana (maneja **empates** de forma nativa). El ranking usa el "
+                "valor **conservador**:")
+    st.latex(r"\text{rating} = \mu - 3\sigma")
+    st.markdown("**Probabilidad de victoria** (receta oficial, con "
+                r"$\beta$ = factor de rendimiento):")
+    st.latex(r"P(A \text{ gana}) = \Phi\!\left("
+             r"\frac{\mu_A - \mu_B}{\sqrt{2\beta^2 + \sigma_A^2 + \sigma_B^2}}"
+             r"\right)")
+
+with st.expander("④ Estrategia de apuesta (la activa)", expanded=True):
     st.markdown("Para cada partido programado: **elegir lado → filtrar → "
                 "dimensionar el stake**. Con bankroll $B$ y cuota decimal $c$:")
-    st.markdown("**1) Lado** según el criterio (Elo, Bayes o mezcla con peso $w$):")
+    st.markdown("**1) Lado** según el criterio (Elo, Bayes, mezcla con peso $w$, "
+                "o **TrueSkill**):")
     st.latex(r"\text{score}_{\text{equipo}} = w\,E + (1-w)\,\hat{\theta}\quad"
              r"\text{(Elo: } w{=}1;\ \text{Bayes: } w{=}0\text{)}")
     st.markdown(r"**2) Filtro Bayes** (opcional): apostar solo si "
@@ -213,7 +231,8 @@ with st.expander("③ Estrategia de apuesta (la activa)", expanded=True):
                if strat["backtest_yield"] is not None else r"\text{n/d}")
         w = strat["blend_weight"]
         crit = {"elo": "w = 1\\ (\\text{Elo})", "bayes": "w = 0\\ (\\text{Bayes})",
-                "blend": f"w = {w:.2f}\\ (\\text{{mezcla}})"}[strat["side_criterion"]]
+                "blend": f"w = {w:.2f}\\ (\\text{{mezcla}})",
+                "trueskill": "\\text{TrueSkill}"}[strat["side_criterion"]]
         sizing_tex = {
             "flat": rf"f = {strat['base_fraction']:.2f}",
             "confidence": rf"f = {strat['base_fraction']:.2f}",

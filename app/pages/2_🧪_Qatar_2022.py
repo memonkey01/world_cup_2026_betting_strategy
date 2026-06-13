@@ -117,12 +117,12 @@ else:
 # --- LADO (a quién apostar) + su parámetro ligado ---
 st.sidebar.header("Selección de lado")
 side_criterion = st.sidebar.selectbox(
-    "Criterio", ["elo", "bayes", "blend"],
+    "Criterio", ["elo", "bayes", "blend", "trueskill"],
     format_func={"elo": "Elo (favorito)", "bayes": "Mayor media Bayes",
-                 "blend": "Mezcla Elo/Bayes"}.get,
+                 "blend": "Mezcla Elo/Bayes", "trueskill": "TrueSkill (skill)"}.get,
     key="side_criterion",
     help="A qué equipo se le apuesta: el favorito por Elo, el de mayor fuerza "
-         "latente Bayes, o una mezcla ponderada de ambos.")
+         "latente Bayes, una mezcla, o el de mayor habilidad TrueSkill.")
 if side_criterion == "blend":
     blend_weight = st.sidebar.slider(
         "Peso de Elo en la mezcla", 0.0, 1.0, 0.5, 0.05, key="blend_weight",
@@ -194,16 +194,17 @@ c2.metric("Brier score", f'{rep["brier"]:.4f}',
 c3.metric("Log loss", f'{rep["log_loss"]:.4f}', help="Menor es mejor.")
 c4.metric("Líder Elo", lb.iloc[0]["team"])
 
-tab1, tab2, tab3, tab4, tab5 = st.tabs(
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(
     ["🏆 Tabla", "📈 Evolución Elo", "🎲 Bayes", "🎯 Calibración",
-     "📉 Evolución combinada"])
+     "📉 Evolución combinada", "🤝 TrueSkill"])
 
 with tab1:
     st.caption("**Elo** = fuerza actual; **Δ Elo** = cambio vs la semilla FIFA; "
-               "**Bayes media/inf/sup** = fuerza latente y su intervalo 95%.")
+               "**Bayes media/inf/sup** = fuerza latente y su intervalo 95%; "
+               "**TS μ/σ** = habilidad TrueSkill y su incertidumbre.")
     show = lb.copy()
     show.columns = ["Equipo", "Elo", "Elo inicial", "Δ Elo",
-                    "Bayes media", "Bayes inf", "Bayes sup"]
+                    "Bayes media", "Bayes inf", "Bayes sup", "TS μ", "TS σ"]
     st.dataframe(show, use_container_width=True, height=520)
 
 with tab2:
@@ -262,6 +263,23 @@ with tab5:
         st.altair_chart(
             alt.layer(elo_line, bayes_line).resolve_scale(y="independent")
             .properties(height=480), use_container_width=True)
+
+with tab6:
+    st.caption("**TrueSkill** (https://trueskill.org): habilidad gaussiana "
+               "$N(\\mu,\\sigma^2)$ por equipo. **μ** = habilidad; **σ** = "
+               "incertidumbre (baja con más partidos); el ranking usa el rating "
+               "conservador **μ − 3σ**. Maneja empates de forma nativa.")
+    ts_rows = [{"Equipo": t, "μ − 3σ": round(exp, 2),
+                "μ": round(pipe.trueskill.get(t).mu, 2),
+                "σ": round(pipe.trueskill.get(t).sigma, 2)}
+               for t, exp in pipe.trueskill.leaderboard()]
+    ts_df = pd.DataFrame(ts_rows)
+    c1, c2 = st.columns([1, 1])
+    with c1:
+        st.dataframe(ts_df, use_container_width=True, hide_index=True, height=460)
+    with c2:
+        top = ts_df.head(12).set_index("Equipo")[["μ − 3σ"]]
+        st.bar_chart(top)
 
 # ======================================================================
 # CUERPO 2 — Backtest de apuestas con TU configuración (params del sidebar)
@@ -332,7 +350,8 @@ with st.expander("🔬 Explorar combinaciones (sweep) y aplicarlas al panel"):
                "Elige una y «Aplicar al panel» la copia a la barra lateral.")
     ranking = sweep_strategies(pipe.match_log, BetParams(**common))
     LABELS = {"flat": "Flat", "confidence": "Confianza", "kelly": "Kelly",
-              "elo": "Elo", "bayes": "Bayes", "blend": "Mezcla"}
+              "elo": "Elo", "bayes": "Bayes", "blend": "Mezcla",
+              "trueskill": "TrueSkill"}
     rank_rows = []
     for i, r in enumerate(ranking):
         m = r["metrics"]

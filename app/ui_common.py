@@ -59,9 +59,10 @@ def betting_controls() -> dict:
     kelly_fraction = st.sidebar.slider("Fracción de Kelly", 0.05, 1.0, 0.25, 0.05,
                                        key="kelly_fraction")
     side_criterion = st.sidebar.selectbox(
-        "Criterio para elegir el lado", ["elo", "bayes", "blend"],
+        "Criterio para elegir el lado", ["elo", "bayes", "blend", "trueskill"],
         format_func={"elo": "Elo (favorito)", "bayes": "Mayor media Bayes",
-                     "blend": "Mezcla Elo/Bayes"}.get, key="side_criterion")
+                     "blend": "Mezcla Elo/Bayes",
+                     "trueskill": "TrueSkill (skill)"}.get, key="side_criterion")
     blend_weight = st.sidebar.slider("Peso de Elo en la mezcla (blend)", 0.0, 1.0,
                                      0.5, 0.05, key="blend_weight")
     bayes_threshold = st.sidebar.slider("Umbral de Bayes (filtro)", 0.30, 0.80,
