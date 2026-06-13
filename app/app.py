@@ -18,6 +18,7 @@ Vistas:
 from __future__ import annotations
 import streamlit as st
 import pandas as pd
+import altair as alt
 from sqlmodel import Session, select
 
 from src.pipeline import Pipeline
@@ -133,7 +134,9 @@ c2.metric("Brier score", f'{rep["brier"]:.4f}', help="0 = perfecto · 0.25 = aza
 c3.metric("Log loss", f'{rep["log_loss"]:.4f}')
 c4.metric("Líder Elo", lb.iloc[0]["team"])
 
-tab1, tab2, tab3, tab4 = st.tabs(["🏆 Tabla", "📈 Evolución Elo", "🎲 Bayes", "🎯 Calibración"])
+tab1, tab2, tab3, tab4, tab5 = st.tabs(
+    ["🏆 Tabla", "📈 Evolución Elo", "🎲 Bayes", "🎯 Calibración",
+     "📉 Evolución combinada"])
 
 # ---- Tab 1: tabla combinada ----
 with tab1:
@@ -185,3 +188,40 @@ with tab4:
         f"**Brier {rep['brier']:.4f}** · **LogLoss {rep['log_loss']:.4f}** · "
         f"{rep['n_matches']} partidos."
     )
+
+# ---- Tab 5: evolucion combinada Elo + Bayes (doble eje Y) ----
+with tab5:
+    st.subheader("Evolución combinada — Elo y probabilidad bayesiana")
+    st.caption(
+        "Eje X = partido jugado por el equipo. "
+        "**Línea sólida = Elo** (eje izq, ~1500) · "
+        "**línea punteada = prob. Bayes** (eje der, 0–1). Color = equipo."
+    )
+    all_teams = [r["team"] for r in pipe.combined_leaderboard()]
+    sel = st.multiselect("Selecciones a comparar", all_teams,
+                         default=all_teams[:3])
+    evo_df = pd.DataFrame(pipe.team_evolution())
+    plot_df = evo_df[evo_df["team"].isin(sel)] if sel else evo_df.iloc[0:0]
+
+    if plot_df.empty:
+        st.info("Elige al menos una selección.")
+    else:
+        base = alt.Chart(plot_df).encode(
+            x=alt.X("match_no:Q", title="Partido del equipo",
+                    axis=alt.Axis(tickMinStep=1)),
+            color=alt.Color("team:N", title="Equipo"),
+            tooltip=["team:N", "match_no:Q",
+                     alt.Tooltip("elo:Q", format=".0f"),
+                     alt.Tooltip("bayes:Q", format=".3f")],
+        )
+        elo_line = base.mark_line(point=True).encode(
+            y=alt.Y("elo:Q", title="Elo",
+                    scale=alt.Scale(zero=False)),
+        )
+        bayes_line = base.mark_line(point=True, strokeDash=[4, 4]).encode(
+            y=alt.Y("bayes:Q", title="Prob. Bayes",
+                    scale=alt.Scale(domain=[0, 1])),
+        )
+        chart = alt.layer(elo_line, bayes_line).resolve_scale(
+            y="independent").properties(height=520)
+        st.altair_chart(chart, use_container_width=True)

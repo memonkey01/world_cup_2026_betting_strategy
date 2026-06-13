@@ -68,6 +68,28 @@ class Pipeline:
             "reliability": reliability_bins(self.pred_probs, self.pred_outcomes),
         }
 
+    def team_evolution(self) -> list[dict]:
+        """
+        Serie temporal por equipo para graficar Elo y Bayes con eje X = partido
+        jugado por el equipo. Devuelve filas {team, match_no, elo, bayes}.
+
+        elo.history y snapshots van parejos por índice (uno por partido). Para
+        cada partido, sus dos equipos suman un partido a su contador propio.
+        """
+        rows = []
+        counts: dict[str, int] = {}
+        for i, rec in enumerate(self.elo.history):
+            snap = self.snapshots[i]
+            for team in (rec["team_a"], rec["team_b"]):
+                counts[team] = counts.get(team, 0) + 1
+                rows.append({
+                    "team": team,
+                    "match_no": counts[team],
+                    "elo": snap["elo"][team],
+                    "bayes": snap["bayes"].get(team, 0.5),
+                })
+        return rows
+
     def combined_leaderboard(self) -> list[dict]:
         """Tabla unificada: Elo + media bayesiana + intervalo de credibilidad."""
         rows = []

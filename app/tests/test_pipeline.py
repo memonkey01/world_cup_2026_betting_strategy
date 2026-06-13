@@ -47,3 +47,18 @@ def test_full_pipeline_calibration():
     assert rep["n_matches"] == len(QATAR_2022_SAMPLE)
     assert rep["brier"] < 0.25  # mejor que el azar
     assert len(p.combined_leaderboard()) > 0
+
+
+def test_team_evolution_per_team_match_index():
+    p = Pipeline()
+    p.seed(FIFA_SNAPSHOT_EXAMPLE)
+    p.process_all(QATAR_2022_SAMPLE)
+    ev = p.team_evolution()
+    # una fila por aparición de equipo (2 equipos por partido)
+    assert len(ev) == 2 * len(QATAR_2022_SAMPLE)
+    # Argentina jugó 6 partidos en el sample -> match_no 1..6 consecutivos
+    arg = [r for r in ev if r["team"] == "Argentina"]
+    assert [r["match_no"] for r in arg] == [1, 2, 3, 4, 5, 6]
+    # rangos plausibles
+    assert all(1000 < r["elo"] < 2300 for r in ev)
+    assert all(0.0 <= r["bayes"] <= 1.0 for r in ev)
