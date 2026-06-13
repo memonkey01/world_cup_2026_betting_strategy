@@ -382,20 +382,29 @@ with tab_rec:
             wc = get_or_create_tournament(s, "World Cup 2026", 2026, "live")
             odds_map = {(o["home"], o["away"]): o
                         for o in latest_odds(s, wc, odds_source)}
-    st.caption("🔵 con apuesta `@ cuota` · ⚪ sin apuesta (warm-up / filtro Bayes). "
-               f"Fuente de cuotas activa: **{odds_source}** (se elige en 💱 Cuotas).")
+    SIZING_LABEL = {"flat": "Flat (% fijo)", "confidence": "Proporcional a confianza",
+                    "kelly": "Kelly fraccional"}
+    bankroll0 = float(params.bankroll0)
+    st.caption(
+        f"🔵 con apuesta · ⚪ sin apuesta (warm-up / filtro Bayes). "
+        f"**Tamaño de apuesta:** {SIZING_LABEL.get(params.sizing, params.sizing)} "
+        f"sobre bankroll **{bankroll0:.0f}**. Fuente de cuotas: **{odds_source}**.")
+
     rows = []
+    total_stake = 0.0
     for m in calendar:
         if m["status_finished"]:
             continue
         o = odds_map.get((m["home"], m["away"]))
         mo = {"home": o["home_decimal"], "away": o["away_decimal"]} if o else None
         r = recommend_bet(pipe.prematch_rec(m["home"], m["away"]),
-                          float(params.bankroll0), params, match_odds=mo)
+                          bankroll0, params, match_odds=mo)
+        pct = (r["stake"] / bankroll0 * 100.0) if bankroll0 else 0.0
         if r["bet"]:
+            total_stake += r["stake"]
             st.markdown(f"🔵 {m['home']} vs {m['away']} · {m['stage']} → "
                         f"**Apostar: {r['pick']}** · stake **{r['stake']:.0f}** "
-                        f"@ cuota {r['odds']:.2f} "
+                        f"(**{pct:.1f}%** del bankroll) @ cuota {r['odds']:.2f} "
                         f"(p={r['p_pick']:.2f}, Bayes={r['bayes_pick']:.2f})")
         else:
             motivo = "warm-up" if r["skip_warmup"] else "filtro Bayes"
@@ -403,10 +412,19 @@ with tab_rec:
                         f"— sin apuesta ({motivo})")
         rows.append({"fecha": m["date"], "partido": f"{m['home']} vs {m['away']}",
                      "lado": r["pick"] if r["bet"] else "—",
-                     "stake": round(r["stake"], 2), "cuota": round(r["odds"], 2),
+                     "stake": round(r["stake"], 2),
+                     "% bankroll": round(pct, 1), "cuota": round(r["odds"], 2),
                      "p_elo": round(r["p_pick"], 3), "bayes": round(r["bayes_pick"], 3),
                      "apuesta": "sí" if r["bet"] else "no"})
+
+    n_bets = sum(1 for x in rows if x["apuesta"] == "sí")
     if rows:
+        s1, s2, s3 = st.columns(3)
+        s1.metric("Apuestas sugeridas", n_bets)
+        s2.metric("Total a apostar", f"{total_stake:.0f}",
+                  help="Suma de los stakes recomendados.")
+        s3.metric("% del bankroll comprometido",
+                  f"{(total_stake/bankroll0*100.0) if bankroll0 else 0:.1f}%")
         st.dataframe(pd.DataFrame(rows), use_container_width=True, height=360)
     else:
         st.caption("No hay partidos programados en el calendario actual.")
