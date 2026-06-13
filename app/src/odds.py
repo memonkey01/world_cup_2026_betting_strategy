@@ -94,3 +94,70 @@ def parse_codere(payload: dict, fetched_at: str) -> list[OddsQuote]:
                           normalize_es(ev.get("away", "")),
                           home_dec, away_dec, draw_dec, fetched_at))
     return out
+
+
+# ----------------------------------------------------------------------
+# Fetchers de red (best-effort; selectores/endpoint a validar en vivo).
+# No se cubren con unit-tests: el parseo (arriba) sí.
+# ----------------------------------------------------------------------
+POLYMARKET_GAMMA = "https://gamma-api.polymarket.com/markets"
+
+
+def fetch_polymarket(query: str = "World Cup", limit: int = 100) -> list:
+    """Consulta la Gamma API de Polymarket y devuelve la lista de mercados (cruda).
+    El filtrado/forma exacta puede requerir ajuste contra la API real."""
+    import urllib.parse
+    import urllib.request
+    params = urllib.parse.urlencode({"active": "true", "closed": "false",
+                                     "limit": limit, "search": query})
+    url = f"{POLYMARKET_GAMMA}?{params}"
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+    try:
+        with urllib.request.urlopen(req, timeout=20) as r:
+            data = json.loads(r.read().decode("utf-8"))
+            return data if isinstance(data, list) else data.get("data", [])
+    except Exception as e:  # noqa: BLE001
+        print(f"[warn] polymarket fetch falló: {e}")
+        return []
+
+
+CODERE_URL = "https://www.codere.mx/apuestas-deportivas/deportes/futbol"
+
+
+def fetch_codere(url: str = CODERE_URL) -> dict:
+    """Carga Codere con Playwright y extrae cuotas. Devuelve el payload normalizado
+    {events:[{home,away,odds:{home,draw,away}}]}. Los selectores son best-effort."""
+    from playwright.sync_api import sync_playwright
+    events: list[dict] = []
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        ctx = browser.new_context(
+            user_agent=("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                        "AppleWebKit/537.36 (KHTML, like Gecko) "
+                        "Chrome/120.0 Safari/537.36"))
+        page = ctx.new_page()
+        try:
+            page.goto(url, wait_until="domcontentloaded", timeout=30000)
+            page.wait_for_timeout(3000)
+            # best-effort: cada evento con dos equipos y 3 cuotas (1-X-2)
+            for ev in page.query_selector_all("[data-testid='event'], .event"):
+                names = ev.query_selector_all(
+                    "[data-testid='participant'], .participant-name")
+                odds = ev.query_selector_all(
+                    "[data-testid='odd'], .odd-value, .sportsbook-odds")
+                if len(names) >= 2 and len(odds) >= 3:
+                    def num(el):
+                        try:
+                            return float(el.inner_text().strip().replace(",", "."))
+                        except ValueError:
+                            return 0.0
+                    events.append({
+                        "home": names[0].inner_text().strip(),
+                        "away": names[1].inner_text().strip(),
+                        "odds": {"home": num(odds[0]), "draw": num(odds[1]),
+                                 "away": num(odds[2])},
+                    })
+        except Exception as e:  # noqa: BLE001
+            print(f"[warn] codere scrape falló: {e}")
+        browser.close()
+    return {"events": events}
