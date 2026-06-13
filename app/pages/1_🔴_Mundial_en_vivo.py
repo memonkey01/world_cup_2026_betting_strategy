@@ -21,7 +21,7 @@ from src.ingest import (get_or_create_tournament, seed_teams, ingest_calendar,
 from src.betting import BetParams, recommend_bet
 from src.strategies import load_active_strategy, strategy_to_params
 from src.odds import (detect_source, fetch_polymarket, fetch_codere,
-                      parse_polymarket, parse_codere)
+                      parse_polymarket, parse_codere, select_markets, OddsQuote)
 from src.odds_store import latest_odds, ingest_odds
 from src.scraper import fetch_via_playwright, fetch_via_requests
 from ui_common import model_controls, betting_controls
@@ -157,33 +157,77 @@ with tab_cal:
 
 # ---- Tab Cuotas (hub Codere + Polymarket) ----
 with tab_odds:
-    st.caption("Pega una URL (Codere o Polymarket) y/o ajusta el query de "
-               "Polymarket; «Actualizar solo cuotas» busca al instante y guarda "
-               "en la DB (independiente del scrape de calendario).")
-    url = st.text_input("URL de cuotas (Codere o Polymarket)", key="odds_url")
+    st.caption("Flujo en 2 pasos: **buscar** mercados (query + filtro regex) → "
+               "revisar el preview y **marcar** cuáles guardar → **guardar**. "
+               "El guardado es independiente del scrape de calendario.")
+
+    # Partidos del calendario (para marcar qué mercado casa con un fixture).
+    cal_keys = {(m["home"], m["away"]) for m in calendar if not m["status_finished"]}
+
+    # ---- Paso 1: buscar mercados de Polymarket (query + regex) ----
+    st.markdown("**Polymarket**")
+    pq1, pq2 = st.columns(2)
+    poly_query = pq1.text_input("Query (search de la API)", "World Cup",
+                                key="poly_query")
+    poly_regex = pq2.text_input("Filtro regex (opcional, client-side)", "",
+                                key="poly_regex",
+                                help="Ej: `argentina|mexico|brazil` o `vs`. "
+                                     "Filtra los mercados traídos por question/slug.")
+    if st.button("🔎 Buscar mercados Polymarket"):
+        now_iso = datetime.now().isoformat(timespec="seconds")
+        with st.spinner("Buscando en Polymarket…"):
+            raw = fetch_polymarket(poly_query)
+            sel = select_markets(raw, poly_regex or None)
+            quotes = parse_polymarket(sel, now_iso)
+        st.session_state["poly_preview"] = [vars(q) for q in quotes]
+        st.session_state["poly_fetched_at"] = now_iso
+        st.caption(f"{len(raw)} mercados crudos · {len(sel)} tras regex · "
+                   f"{len(quotes)} parseados como partido.")
+
+    # ---- Paso 2: preview + marcar cuáles guardar ----
+    preview = st.session_state.get("poly_preview", [])
+    if preview:
+        df = pd.DataFrame([{
+            "guardar": (q["home"], q["away"]) in cal_keys,   # default: solo los que casan
+            "partido": f'{q["home"]} vs {q["away"]}',
+            "cuota home": round(q["home_decimal"], 2),
+            "cuota away": round(q["away_decimal"], 2),
+            "P(home)": round(q["home_prob"], 3),
+            "✅ calendario": (q["home"], q["away"]) in cal_keys,
+        } for q in preview])
+        edited = st.data_editor(
+            df, key="poly_editor", use_container_width=True, hide_index=True,
+            height=320,
+            column_order=["guardar", "partido", "cuota home", "cuota away",
+                          "P(home)", "✅ calendario"],
+            disabled=["partido", "cuota home", "cuota away", "P(home)",
+                      "✅ calendario"])
+        st.caption("Marca «guardar» en los mercados que quieras ingestar "
+                   "(por defecto solo los que casan con el calendario).")
+        if st.button("💾 Guardar cuotas seleccionadas"):
+            chosen = [preview[i] for i, v in enumerate(edited["guardar"]) if v]
+            quotes = [OddsQuote(**d) for d in chosen]
+            with Session(db_engine) as s:
+                wc = get_or_create_tournament(s, "World Cup 2026", 2026, "live")
+                n = ingest_odds(s, wc, quotes)
+            st.success(f"{n} cuotas de Polymarket guardadas en la DB.")
+
+    # ---- Codere (de la URL pegada) ----
+    st.markdown("**Codere**")
+    url = st.text_input("URL de Codere", key="odds_url")
     src = detect_source(url) if url else None
     if url:
         st.caption(f"Fuente detectada: **{src or 'no reconocida'}**")
-    poly_query = st.text_input("Query Polymarket", "World Cup", key="poly_query")
-    if st.button("💱 Actualizar solo cuotas"):
+    if st.button("💱 Actualizar Codere (de la URL)", disabled=(src != "codere")):
         now_iso = datetime.now().isoformat(timespec="seconds")
-        n_poly = n_cod = 0
-        with st.spinner("Actualizando cuotas…"):
+        with st.spinner("Scrapeando Codere…"):
             with Session(db_engine) as s:
-                seed_teams(s, FIFA_SNAPSHOT_EXAMPLE)
                 wc = get_or_create_tournament(s, "World Cup 2026", 2026, "live")
-                n_poly = ingest_odds(s, wc,
-                                     parse_polymarket(fetch_polymarket(poly_query), now_iso))
-                if src == "codere":
-                    n_cod = ingest_odds(s, wc,
-                                        parse_codere(fetch_codere(url), now_iso))
-        msg = f"Polymarket: {n_poly} cuotas guardadas."
-        if src == "codere":
-            msg += f" Codere: {n_cod}."
-        elif url:
-            msg += " (la URL no es de Codere; Codere no se actualizó.)"
-        st.success(msg)
+                n_cod = ingest_odds(s, wc, parse_codere(fetch_codere(url), now_iso))
+        st.success(f"Codere: {n_cod} cuotas guardadas.")
 
+    st.divider()
+    st.markdown("**Comparativa (última cuota guardada por fuente vs modelo)**")
     with Session(db_engine) as s:
         wc = get_or_create_tournament(s, "World Cup 2026", 2026, "live")
         poly_map = {(o["home"], o["away"]): o for o in latest_odds(s, wc, "polymarket")}
