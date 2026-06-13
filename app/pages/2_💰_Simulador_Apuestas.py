@@ -19,6 +19,7 @@ from src.db import get_engine, init_db
 from src.models import Match, Tournament
 from src.ingest import ingest_qatar_backtest, load_matches
 from src.betting import BetParams, simulate
+from ui_common import model_controls, betting_controls
 
 st.set_page_config(page_title="Simulador de apuestas", layout="wide")
 st.title("💰 Simulador de apuestas — Mundial (backtest)")
@@ -66,34 +67,16 @@ def get_db():
 
 db_engine = get_db()
 
-with st.sidebar:
-    st.header("Modelo")
-    k_factor = st.slider("Factor K (Elo)", 10, 80, 40, 5)
-    prior_strength = st.slider("Fuerza del prior Bayes", 1.0, 12.0, 4.0, 1.0)
-    use_margin = st.checkbox("Multiplicador por margen de gol", value=True)
-
-    st.header("Apuestas")
-    bankroll0 = st.number_input("Bankroll inicial", 100.0, 1_000_000.0, 1000.0, 100.0)
-    odds = st.number_input("Cuota decimal fija", 1.01, 10.0, 2.0, 0.05)
-    start_match_no = st.slider("Apostar desde la jornada (nº de partido del equipo)",
-                               1, 5, 2)
-    sizing = st.selectbox("Bet sizing",
-                          ["flat", "confidence", "kelly"],
-                          format_func={"flat": "Flat (% fijo)",
-                                       "confidence": "Proporcional a confianza",
-                                       "kelly": "Kelly fraccional"}.get)
-    base_fraction = st.slider("Fracción base del bankroll", 0.01, 0.50, 0.05, 0.01)
-    kelly_fraction = st.slider("Fracción de Kelly", 0.05, 1.0, 0.25, 0.05)
-
-    st.header("Meta-estrategia (criterio de lado)")
-    side_criterion = st.selectbox("Criterio para elegir el lado",
-                                  ["elo", "bayes", "blend"],
-                                  format_func={"elo": "Elo (favorito)",
-                                               "bayes": "Mayor media Bayes",
-                                               "blend": "Mezcla Elo/Bayes"}.get)
-    blend_weight = st.slider("Peso de Elo en la mezcla (blend)", 0.0, 1.0, 0.5, 0.05)
-    bayes_threshold = st.slider("Umbral de Bayes (estrategia filtrada)",
-                                0.30, 0.80, 0.50, 0.01)
+# Controles compartidos entre páginas (mismos parámetros para concordancia).
+k_factor, prior_strength, use_margin = model_controls()
+common = betting_controls()
+st.sidebar.header("Estrategia (sizing)")
+sizing = st.sidebar.selectbox("Bet sizing", ["flat", "confidence", "kelly"],
+                              format_func={"flat": "Flat (% fijo)",
+                                           "confidence": "Proporcional a confianza",
+                                           "kelly": "Kelly fraccional"}.get,
+                              key="sim_sizing")
+bayes_threshold = common["bayes_threshold"]
 
 # --- datos + pipeline ---
 with Session(db_engine) as s:
@@ -110,13 +93,10 @@ pipe.seed(FIFA_SNAPSHOT_EXAMPLE)
 pipe.bayes.seed_from_elo(pipe.initial_elo, strength=float(prior_strength))
 pipe.process_all(matches)
 
-common = dict(bankroll0=float(bankroll0), odds=float(odds), sizing=sizing,
-              base_fraction=float(base_fraction), kelly_fraction=float(kelly_fraction),
-              start_match_no=int(start_match_no), side_criterion=side_criterion,
-              blend_weight=float(blend_weight), bayes_threshold=float(bayes_threshold))
-
-res_all = simulate(pipe.match_log, BetParams(use_bayes_filter=False, **common))
-res_flt = simulate(pipe.match_log, BetParams(use_bayes_filter=True, **common))
+res_all = simulate(pipe.match_log,
+                   BetParams(sizing=sizing, use_bayes_filter=False, **common))
+res_flt = simulate(pipe.match_log,
+                   BetParams(sizing=sizing, use_bayes_filter=True, **common))
 
 # --- KPIs comparados ---
 st.subheader("Resultados")
