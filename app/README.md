@@ -20,15 +20,21 @@ Playwright y monitor en Streamlit que se actualiza al cerrar cada jornada.
 ## Uso
 
 ```bash
-uv venv && source .venv/bin/activate
-uv pip install -r requirements.txt
-playwright install chromium     # solo para modo "En vivo 2026"
-streamlit run app.py
+cd app
+uv sync
+uv run playwright install chromium     # solo para modo "En vivo 2026"
+uv run streamlit run app.py
+uv run pytest -q                        # tests (sin red)
 ```
 
-- **Backtest Qatar 2022:** offline, usa `src/qatar_fixture.py` (resultados reales).
-- **En vivo 2026:** scrapea `fifa.world` de ESPN por rango de fechas y procesa
-  solo partidos finalizados. Pulsa «Actualizar jornada» al cerrar cada fecha.
+La base de datos SQLite (`app/data/worldcup.db`) es la **fuente de verdad**: el
+scraper la llena con partidos y el pipeline Elo/Bayes lee de ella.
+
+- **Backtest Qatar 2022:** al primer arranque siembra la DB (con el fixture
+  `src/qatar_fixture.py`, offline) y en adelante lee de ella.
+- **En vivo 2026:** scrapea `fifa.world` de ESPN por rango de fechas, persiste los
+  partidos finalizados en la DB y recarga. Pulsa «Actualizar jornada» al cerrar
+  cada fecha.
 
 Endpoint ESPN (sin API key):
 `https://site.api.espn.com/apis/site/v2/sports/soccer/fifa.world/scoreboard?dates=YYYYMMDD-YYYYMMDD`
@@ -53,9 +59,13 @@ pipeline de scraping y la misma capa de calibración.
 src/elo.py            # Elo + empates + margen de gol
 src/bayes.py          # Beta-Bernoulli + métricas de calibración
 src/fifa_seed.py      # FIFA → Elo inicial
-src/scraper.py        # ESPN vía Playwright / requests
-src/qatar_fixture.py  # resultados reales Qatar 2022 (offline)
-src/pipeline.py       # orquestador + snapshots por jornada
-app.py                # monitor Streamlit
-tests/test_pipeline.py
+src/scraper.py        # ESPN vía Playwright / requests + normalización de nombres/fases
+src/qatar_fixture.py  # resultados reales Qatar 2022 (offline / fallback)
+src/pipeline.py       # orquestador Elo+Bayes + snapshots por jornada
+src/models.py         # modelos SQLModel: Team, Tournament, Match, RatingSnapshot
+src/db.py             # engine SQLite, init_db, sesiones
+src/ingest.py         # pegamento scraper ↔ DB ↔ pipeline (DB = fuente de verdad)
+app.py                # monitor Streamlit (lee/escribe vía DB)
+data/worldcup.db      # SQLite (runtime, gitignored)
+tests/                # test_pipeline.py, test_models.py, test_ingest.py
 ```

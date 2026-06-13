@@ -4,7 +4,10 @@ Monitor **Elo + Bayes** para el Mundial de fútbol, con scraping de resultados
 desde ESPN y dashboard en Streamlit. Predice/valida la fuerza de las selecciones
 y calibra las probabilidades del modelo contra resultados reales.
 
-Todo el código vive en [app/](app/). Comentarios, docstrings y README están en español.
+Todo el código vive en [app/](app/) (paquete `src/`, entorno `uv`). Comentarios,
+docstrings y README están en español. La base de datos SQLite
+(`app/data/worldcup.db`) es la **fuente de verdad**: el scraper la llena con
+partidos y el pipeline Elo/Bayes lee de ella.
 
 ## Qué hace
 
@@ -25,14 +28,17 @@ Todo el código vive en [app/](app/). Comentarios, docstrings y README están en
 
 | Archivo | Rol |
 |---------|-----|
-| [app/elo.py](app/elo.py) | `EloSystem` + `expected_score`, `match_scores`, `margin_multiplier` |
-| [app/bayes.py](app/bayes.py) | `BetaBelief`, `BayesianLeague` + métricas `brier_score`, `log_loss`, `reliability_bins` |
-| [app/fifa_seed.py](app/fifa_seed.py) | `fifa_to_elo`, `load_fifa_ranking`, `FIFA_SNAPSHOT_EXAMPLE` |
-| [app/scraper.py](app/scraper.py) | ESPN scoreboard API vía Playwright; `fetch_via_requests` como fallback |
-| [app/qatar_fixture.py](app/qatar_fixture.py) | `QATAR_2022_SAMPLE` — resultados reales para backtest offline |
-| [app/pipeline.py](app/pipeline.py) | `Pipeline` — orquesta seed → Elo + Bayes por jornada, snapshots y calibración |
-| [app/app.py](app/app.py) | Dashboard Streamlit (KPIs, tabla, evolución Elo, Bayes, calibración) |
-| [app/test_pipeline.py](app/test_pipeline.py) | Tests del pipeline |
+| [app/src/elo.py](app/src/elo.py) | `EloSystem` + `expected_score`, `match_scores`, `margin_multiplier` |
+| [app/src/bayes.py](app/src/bayes.py) | `BetaBelief`, `BayesianLeague` + métricas `brier_score`, `log_loss`, `reliability_bins` |
+| [app/src/fifa_seed.py](app/src/fifa_seed.py) | `fifa_to_elo`, `load_fifa_ranking`, `FIFA_SNAPSHOT_EXAMPLE` |
+| [app/src/scraper.py](app/src/scraper.py) | ESPN scoreboard API vía Playwright; `fetch_via_requests` fallback; `normalize_team`/`normalize_stage` |
+| [app/src/qatar_fixture.py](app/src/qatar_fixture.py) | `QATAR_2022_SAMPLE` — resultados reales para backtest offline / fallback |
+| [app/src/pipeline.py](app/src/pipeline.py) | `Pipeline` — orquesta seed → Elo + Bayes por jornada, snapshots y calibración |
+| [app/src/models.py](app/src/models.py) | Modelos SQLModel: `Team`, `Tournament`, `Match`, `RatingSnapshot` |
+| [app/src/db.py](app/src/db.py) | Engine SQLite, `init_db`, sesiones (`:memory:` para tests) |
+| [app/src/ingest.py](app/src/ingest.py) | Pegamento scraper ↔ DB ↔ pipeline: `seed_teams`, `ingest_qatar_backtest`, `ingest_live`, `load_matches`, `persist_snapshots` |
+| [app/app.py](app/app.py) | Dashboard Streamlit (lee/escribe vía DB) |
+| [app/tests/](app/tests/) | `test_pipeline.py`, `test_models.py`, `test_ingest.py` |
 
 Flujo: `Pipeline.seed(fifa_points)` → `process_all(matches)` donde cada `match`
 es la tupla `(date, stage, home, away, home_goals, away_goals)`. Elo y Bayes se
@@ -50,39 +56,32 @@ Endpoint ESPN (sin API key):
 
 ## Comandos
 
+Todos desde `app/` (donde vive el entorno `uv`):
+
 ```bash
 cd app
-uv venv && source .venv/bin/activate   # PowerShell: .venv\Scripts\Activate.ps1
-uv pip install -r requirements.txt
-playwright install chromium            # solo para modo "En vivo 2026"
-streamlit run app.py
-python -m pytest -q                    # tests
+uv sync
+uv run playwright install chromium     # solo para modo "En vivo 2026"
+uv run streamlit run app.py
+uv run pytest -q                        # tests (sin red)
 ```
 
-## ⚠️ Gotcha: layout vs. imports
+## Flujo de datos (DB = fuente de verdad)
 
-El código está escrito como **paquete `src`** pero en disco está **plano en `app/`**:
-
-- `app.py` y `test_pipeline.py` hacen `from src.elo import …`
-- `pipeline.py` hace imports relativos `from .elo import …`
-- El README describe una carpeta `src/` y `tests/` que **no existen** en disco.
-
-Por eso, tal cual, `streamlit run app.py` y `pytest` **fallan con `ModuleNotFoundError`**.
-Para que corra hay dos opciones (elegir una y ser consistente):
-
-1. **Reorganizar** moviendo `elo.py, bayes.py, fifa_seed.py, scraper.py,
-   qatar_fixture.py, pipeline.py` a `app/src/` y `test_pipeline.py` a `app/tests/`
-   (es lo que el README ya documenta), o
-2. **Aplanar los imports** quitando el prefijo `src.` y volviendo absolutos los
-   relativos de `pipeline.py` (`from .elo` → `from elo`).
-
-La opción 1 alinea código, README y `app.py` sin tocar lógica — preferirla.
+`scraper` (o fixture de fallback) → `ingest.ingest_*` persiste `Match` en SQLite →
+`ingest.load_matches` devuelve tuplas → `Pipeline.process_all` (Elo+Bayes en
+memoria) → `ingest.persist_snapshots` vuelca `RatingSnapshot` de vuelta. El
+`Pipeline`/Elo/Bayes son puros y no tocan la DB.
 
 ## Convenciones
 
-- Python con `from __future__ import annotations` y `@dataclass` en todos los modelos.
+- Python 3.11+, entorno `uv` (`pyproject.toml` en `app/`), tests con `pytest`
+  (`pythonpath=["."]` para resolver `from src.*`).
+- Persistencia con **SQLModel** sobre SQLite; tests usan engine `:memory:`.
+- Python con `from __future__ import annotations` y `@dataclass`/SQLModel en los modelos.
 - Sin scipy: el intervalo de credibilidad Beta usa aproximación normal con
-  `statistics.NormalDist` ([app/bayes.py](app/bayes.py)).
+  `statistics.NormalDist` ([app/src/bayes.py](app/src/bayes.py)).
+- Los tests no hacen red: el scraping se inyecta (`scrape_fn`) o se parsean payloads guardados.
 - Marcadores Elo en **tiempo reglamentario** — los penales no cuentan.
 - Empate = 0.5 tanto en Elo como en Bayes.
 
