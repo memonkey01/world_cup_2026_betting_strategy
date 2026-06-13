@@ -151,6 +151,26 @@ def test_recommend_bet_stake_capped_by_bankroll():
     assert abs(out["stake"] - 100.0) < 1e-9  # no excede el bankroll
 
 
+def test_recommend_bet_uses_match_odds():
+    # Kelly: b=odds-1, p=0.7. Con odds 2.0 -> f*=0.4 ; con odds 3.0 -> f*=0.55
+    p = BetParams(sizing="kelly", kelly_fraction=1.0, start_match_no=2,
+                  side_criterion="elo", odds=2.0)
+    base = recommend_bet(prec(p_home=0.7), 1000.0, p)
+    withodds = recommend_bet(prec(p_home=0.7), 1000.0, p,
+                             match_odds={"home": 3.0, "away": 1.5})
+    assert abs(base["odds"] - 2.0) < 1e-9
+    assert abs(withodds["odds"] - 3.0) < 1e-9          # usa la cuota del lado home
+    assert withodds["stake"] > base["stake"]           # más cuota -> más Kelly
+
+
+def test_recommend_bet_match_odds_missing_side_falls_back():
+    p = BetParams(sizing="flat", base_fraction=0.1, start_match_no=2,
+                  side_criterion="elo", odds=2.0)
+    # elige home pero solo hay cuota de away -> cae a params.odds
+    out = recommend_bet(prec(p_home=0.7), 1000.0, p, match_odds={"away": 1.5})
+    assert abs(out["odds"] - 2.0) < 1e-9
+
+
 def test_sweep_strategies_ranks_by_yield():
     from src.betting import sweep_strategies
     # log de 6 partidos, equipos ya con match_no>=2 (sin warm-up)

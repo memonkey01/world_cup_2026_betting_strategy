@@ -121,21 +121,26 @@ def simulate(match_log: list[dict], params: BetParams) -> dict:
     }
 
 
-def recommend_bet(rec: dict, bankroll: float, params: BetParams) -> dict:
+def recommend_bet(rec: dict, bankroll: float, params: BetParams,
+                  match_odds: dict | None = None) -> dict:
     """Recomendación para UN partido próximo (rec sin resultado).
-    Aplica pick_side + filtros (warm-up, umbral Bayes) + stake_amount."""
+    Si `match_odds` trae la cuota del lado elegido ({'home':..,'away':..}), se usa
+    esa cuota real para el sizing/Kelly; si no, cae a params.odds."""
     side, p_pick, bayes_pick, match_no = pick_side(
         rec, params.side_criterion, params.blend_weight)
+    eff = params
+    if match_odds and match_odds.get(side):
+        eff = replace(params, odds=float(match_odds[side]))
     skip_warmup = match_no < params.start_match_no
     filtered_out = params.use_bayes_filter and bayes_pick < params.bayes_threshold
     if skip_warmup or filtered_out:
         stake = 0.0
     else:
-        stake = min(stake_amount(params, bankroll, p_pick), bankroll)
+        stake = min(stake_amount(eff, bankroll, p_pick), bankroll)
     return {
         "side": side, "pick": rec[side],
         "p_pick": p_pick, "bayes_pick": bayes_pick, "match_no": match_no,
-        "stake": stake,
+        "stake": stake, "odds": eff.odds,
         "skip_warmup": skip_warmup, "filtered_out": filtered_out,
         "bet": stake > 0,
     }
