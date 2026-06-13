@@ -18,6 +18,24 @@ def model_controls() -> tuple[float, float, bool]:
     return float(k), float(prior), bool(margin)
 
 
+def fifa_ranking() -> dict[str, float]:
+    """Sidebar 'Ranking FIFA': snapshot incluido o JSON subido {equipo: puntos}."""
+    import json
+    from src.fifa_seed import FIFA_SNAPSHOT_EXAMPLE
+    st.sidebar.header("Ranking FIFA")
+    fuente = st.sidebar.radio("Origen", ["Snapshot incluido", "Subir JSON"],
+                              key="fifa_source")
+    if fuente == "Subir JSON":
+        up = st.sidebar.file_uploader("JSON {equipo: puntos}", type="json",
+                                      key="fifa_json")
+        if up is not None:
+            try:
+                return {k: float(v) for k, v in json.load(up).items()}
+            except (ValueError, TypeError):
+                st.sidebar.error("JSON inválido; usando el snapshot incluido.")
+    return dict(FIFA_SNAPSHOT_EXAMPLE)
+
+
 def betting_controls() -> dict:
     """Sidebar 'Apuestas': params compartidos (sin 'sizing' ni filtro Bayes).
     Devuelve un dict listo para BetParams(**common, sizing=..., use_bayes_filter=...)."""

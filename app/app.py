@@ -23,7 +23,7 @@ from src.db import get_engine, init_db
 from src.models import Match, Tournament
 from src.ingest import (ingest_qatar_backtest, load_matches, clear_snapshots,
                         persist_snapshots)
-from ui_common import model_controls
+from ui_common import model_controls, fifa_ranking
 
 st.set_page_config(page_title="Backtest — Mundial Elo+Bayes", layout="wide")
 
@@ -65,7 +65,7 @@ Mueve los controles de la izquierda y todo se recalcula al instante.
 
 # Parámetros del modelo (compartidos entre páginas vía session_state).
 k_factor, prior_strength, use_margin = model_controls()
-fifa_points = FIFA_SNAPSHOT_EXAMPLE
+fifa_points = fifa_ranking()
 
 
 # ----------------------------------------------------------------------
