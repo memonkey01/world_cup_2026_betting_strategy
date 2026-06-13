@@ -21,7 +21,8 @@ from src.ingest import (get_or_create_tournament, seed_teams, ingest_calendar,
 from src.betting import BetParams, recommend_bet
 from src.strategies import load_active_strategy, strategy_to_params
 from src.odds import (detect_source, fetch_polymarket, fetch_codere,
-                      parse_polymarket, parse_codere, select_markets, OddsQuote)
+                      parse_polymarket_events, parse_codere, select_markets,
+                      OddsQuote)
 from src.odds_store import latest_odds, ingest_odds
 from src.scraper import fetch_via_playwright, fetch_via_requests
 from ui_common import model_controls, betting_controls
@@ -189,34 +190,61 @@ with tab_cal:
 
 # ---- Tab Cuotas (hub Codere + Polymarket) ----
 with tab_odds:
-    st.caption("Flujo en 2 pasos: **buscar** mercados (query + filtro regex) → "
+    st.caption("Flujo en 2 pasos: **buscar** mercados (por *tag* + filtro regex) → "
                "revisar el preview y **marcar** cuáles guardar → **guardar**. "
                "El guardado es independiente del scrape de calendario.")
 
     # Partidos del calendario (para marcar qué mercado casa con un fixture).
     cal_keys = {(m["home"], m["away"]) for m in calendar if not m["status_finished"]}
 
-    # ---- Paso 1: buscar mercados de Polymarket (query + regex) ----
-    st.markdown("**Polymarket**")
-    pq1, pq2 = st.columns(2)
-    poly_query = pq1.text_input("Query (search de la API)", "World Cup",
-                                key="poly_query")
-    poly_regex = pq2.text_input("Filtro regex (opcional, client-side)", "",
+    # ---- Paso 1: traer mercados del Mundial por TAG (la API no busca por texto) ----
+    st.markdown("**Polymarket** — eventos del Mundial por *tag* "
+                "(la Gamma API no busca por texto; se pagina por tag).")
+    pq1, pq2, pq3 = st.columns([1, 1, 2])
+    poly_tag = pq1.number_input("Tag ID", 1, 999999, 102232, 1, key="poly_tag",
+                                help="Tag de Polymarket. **102232 = FIFA World Cup 2026**.")
+    poly_max = pq2.number_input("Máx. eventos", 100, 2000, 500, 100, key="poly_max",
+                                help="Eventos a traer (paginado de 100). Cada evento "
+                                     "puede tener varios mercados.")
+    poly_regex = pq3.text_input("Filtro regex (opcional, client-side)", "",
                                 key="poly_regex",
-                                help="Ej: `argentina|mexico|brazil` o `vs`. "
-                                     "Filtra los mercados traídos por question/slug.")
+                                help="Ej: `argentina|mexico` o `vs|beat`. Filtra los "
+                                     "mercados traídos por question/slug.")
     if st.button("🔎 Buscar mercados Polymarket"):
         now_iso = datetime.now().isoformat(timespec="seconds")
-        with st.spinner("Buscando en Polymarket…"):
-            raw = fetch_polymarket(poly_query)
+        with st.spinner(f"Trayendo hasta {int(poly_max)} eventos del tag "
+                        f"{int(poly_tag)}…"):
+            raw = fetch_polymarket(tag_id=int(poly_tag), max_events=int(poly_max))
             sel = select_markets(raw, poly_regex or None)
-            quotes = parse_polymarket(sel, now_iso)
+            quotes = parse_polymarket_events(sel, now_iso)
+        st.session_state["poly_raw"] = [{
+            "evento": e.get("title") or e.get("slug") or "(sin título)",
+            "mercados": len(e.get("markets") or []),
+            "slug": e.get("slug", ""),
+        } for e in raw]
+        st.session_state["poly_counts"] = (len(raw), len(sel), len(quotes))
         st.session_state["poly_preview"] = [vars(q) for q in quotes]
         st.session_state["poly_fetched_at"] = now_iso
-        st.caption(f"{len(raw)} mercados crudos · {len(sel)} tras regex · "
-                   f"{len(quotes)} parseados como partido.")
 
-    # ---- Paso 2: preview + marcar cuáles guardar ----
+    counts = st.session_state.get("poly_counts")
+    if counts:
+        st.caption(f"📥 {counts[0]} eventos crudos · {counts[1]} tras regex · "
+                   f"**{counts[2]} parseados como partido**.")
+        if not counts[0]:
+            st.warning("No llegó ningún evento: revisa el **Tag ID** o tu conexión.")
+        elif not counts[2]:
+            st.warning("Llegaron eventos pero **ninguno se parseó como partido** "
+                       "(p. ej. solo mercados de campeón/grupo, sin partidos aún). "
+                       "Mira los eventos crudos abajo y ajusta el regex/tag.")
+
+    raw_rows = st.session_state.get("poly_raw", [])
+    if raw_rows:
+        with st.expander(f"🔍 Ver eventos crudos ({len(raw_rows)})",
+                         expanded=not st.session_state.get("poly_preview")):
+            st.dataframe(pd.DataFrame(raw_rows), use_container_width=True,
+                         height=300, hide_index=True)
+
+    # ---- Paso 2: preview parseado + marcar cuáles guardar ----
     preview = st.session_state.get("poly_preview", [])
     if preview:
         df = pd.DataFrame([{

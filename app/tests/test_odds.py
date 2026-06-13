@@ -1,7 +1,8 @@
 """Tests de la capa pura de cuotas (conversores + parsers con fixtures)."""
 from src.odds import (OddsQuote, price_to_decimal, american_to_decimal,
                       implied_prob, normalize_es, parse_polymarket, parse_codere,
-                      _parse_versus, detect_source, select_markets)
+                      _parse_versus, detect_source, select_markets,
+                      parse_polymarket_events)
 
 
 def test_converters():
@@ -98,6 +99,59 @@ def test_detect_source():
     assert detect_source("https://polymarket.com/event/world-cup") == "polymarket"
     assert detect_source("https://www.espn.com/soccer") is None
     assert detect_source("") is None
+
+
+# Estructura real de un partido en Polymarket: un evento "X vs. Y" con tres
+# mercados Yes/No ("Will X win…", "Will Y win…", "…end in a draw?").
+POLY_EVENTS = [{
+    "title": "Qatar vs. Switzerland",
+    "slug": "fifwc-qat-che-2026-06-13",
+    "markets": [
+        {"question": "Will Qatar vs. Switzerland end in a draw?",
+         "outcomes": "[\"Yes\", \"No\"]", "outcomePrices": "[\"0.135\", \"0.865\"]"},
+        {"question": "Will Switzerland win on 2026-06-13?",
+         "outcomes": "[\"Yes\", \"No\"]", "outcomePrices": "[\"0.815\", \"0.185\"]"},
+        {"question": "Will Qatar win on 2026-06-13?",
+         "outcomes": "[\"Yes\", \"No\"]", "outcomePrices": "[\"0.0605\", \"0.9395\"]"},
+    ],
+}]
+
+
+def test_parse_polymarket_events():
+    quotes = parse_polymarket_events(POLY_EVENTS, "2026-06-13T08:00:00")
+    assert len(quotes) == 1
+    q = quotes[0]
+    assert q.home == "Qatar" and q.away == "Switzerland"
+    assert abs(q.home_prob - 0.0605) < 1e-6        # P(Qatar gana)
+    assert abs(q.away_prob - 0.815) < 1e-6         # P(Switzerland gana)
+    assert q.draw_decimal is not None and abs(q.draw_decimal - 1 / 0.135) < 1e-6
+
+
+def test_parse_polymarket_events_skips_non_match():
+    # Mercado de campeón (no es un partido) -> sin título "X vs Y" -> ignorado.
+    champ = [{"title": "Will Spain win the 2026 FIFA World Cup?",
+              "markets": [{"question": "Will Spain win the 2026 FIFA World Cup?",
+                           "outcomes": "[\"Yes\", \"No\"]",
+                           "outcomePrices": "[\"0.16\", \"0.84\"]"}]}]
+    assert parse_polymarket_events(champ, "t") == []
+
+
+# Mercado de 3 outcomes (Equipo A / Empate / Equipo B) -> incluye draw_decimal.
+POLY_3WAY = [{
+    "question": "Mexico vs Canada",
+    "outcomes": "[\"Mexico\", \"Draw\", \"Canada\"]",
+    "outcomePrices": "[\"0.5\", \"0.3\", \"0.2\"]",
+}]
+
+
+def test_parse_polymarket_threeway():
+    quotes = parse_polymarket(POLY_3WAY, "2026-06-13T08:00:00")
+    assert len(quotes) == 1
+    q = quotes[0]
+    assert q.home == "Mexico" and q.away == "Canada"
+    assert abs(q.home_prob - 0.5) < 1e-6
+    assert abs(q.away_prob - 0.2) < 1e-6
+    assert q.draw_decimal is not None and abs(q.draw_decimal - 1 / 0.3) < 1e-6
 
 
 def test_select_markets_regex():

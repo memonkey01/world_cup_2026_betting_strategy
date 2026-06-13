@@ -40,7 +40,7 @@ pipeline Elo/Bayes lee de ella.
 | [app/src/ingest.py](app/src/ingest.py) | scraper ↔ DB ↔ pipeline: `ingest_qatar_backtest`, `ingest_live`, `ingest_calendar`, `load_matches` (finalizados), `load_calendar` (todos), `persist_snapshots`, `clear_snapshots` |
 | [app/src/betting.py](app/src/betting.py) | Motor puro de apuestas: `BetParams`, `pick_side`, `stake_amount`, `simulate`, `recommend_bet`, `sweep_strategies` |
 | [app/src/strategies.py](app/src/strategies.py) | Estrategia activa en la DB: `save_active_strategy`, `load_active_strategy`, `strategy_to_params` |
-| [app/src/odds.py](app/src/odds.py) | Capa de cuotas: `OddsQuote`, conversores, `detect_source`, `select_markets` (filtro regex), `parse_polymarket`/`parse_codere` (puro) + `fetch_*` (red) |
+| [app/src/odds.py](app/src/odds.py) | Capa de cuotas: `OddsQuote`, conversores, `detect_source`, `select_markets` (filtro regex), `parse_polymarket_events`/`parse_polymarket`/`parse_codere` (puro) + `fetch_*` (red, Polymarket por tag/eventos paginados) |
 | [app/src/odds_store.py](app/src/odds_store.py) | Persistencia de cuotas: `ingest_odds`, `latest_odds`, `latest_scrape_iso` |
 | [app/src/dbview.py](app/src/dbview.py) | Inspección read-only de la DB: `table_schema`, `table_rows` |
 | [app/ui_common.py](app/ui_common.py) | Controles de sidebar compartidos entre páginas (`model_controls`, `betting_controls`, `fifa_ranking`) |
@@ -77,11 +77,16 @@ permite override manual de la estrategia activa.
 
 La página **Mundial en vivo** está en 3 tabs (Calendario / Cuotas / Recomendaciones).
 El **hub de cuotas** vive en la tab Cuotas. Polymarket es un flujo de 2 pasos:
-"🔎 Buscar mercados" (`fetch_polymarket(query)` → `select_markets(raw, regex)`
-client-side → `parse_polymarket`) llena un **preview** (`st.data_editor` con
-checkbox `guardar` por mercado, default = los que casan con el calendario);
-"💾 Guardar seleccionadas" ingesta solo los marcados (`OddsQuote(**d)` →
-`ingest_odds`). Codere tiene su propio botón (URL detectada con `detect_source`).
+"🔎 Buscar mercados" trae **eventos por `tag_id`** (la Gamma API **no tiene
+búsqueda de texto**; 102232 = FIFA World Cup 2026) **paginando** `/events`
+(límite 100/página vía `offset`), `select_markets(raw, regex)` filtra eventos
+client-side y `parse_polymarket_events` los convierte a cuota por partido. Cada
+evento de partido es "X vs. Y" con mercados Yes/No "Will X win…"/"Will Y win…"/
+"…end in a draw?" → home/away/draw. Llena un **preview** (`st.data_editor` con
+checkbox `guardar`, default = los que casan con el calendario); "💾 Guardar
+seleccionadas" ingesta solo los marcados (`OddsQuote(**d)` → `ingest_odds`). Hay
+un expander "ver eventos crudos" y contadores (crudos→regex→partidos) para
+diagnosticar. Codere tiene su propio botón (URL detectada con `detect_source`).
 Debajo, comparar Codere/Polymarket vs el modelo entrenado con finalizados 2026, y
 **elegir ahí la fuente** que alimenta las recomendaciones (key `live_odds_source`).
 

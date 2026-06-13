@@ -112,9 +112,14 @@ def select_markets(payload: list, pattern: str | None = None) -> list:
     return out
 
 
+DRAW_LABELS = {"draw", "tie", "empate", "x"}
+
+
 def parse_polymarket(payload: list, fetched_at: str) -> list[OddsQuote]:
-    """Soporta (1) mercados de 2 outcomes = equipos, y (2) mercados Yes/No
-    'Will X beat Y' que se emparejan por partido (clave frozenset{equipos})."""
+    """Soporta tres formas de mercado de Polymarket:
+    (1) 2 outcomes = equipos (moneyline sin empate);
+    (2) Yes/No 'Will X beat Y' que se emparejan por partido (frozenset{equipos});
+    (3) 3 outcomes 'Equipo A / Empate / Equipo B' (incluye `draw_decimal`)."""
     out: list[OddsQuote] = []
     pending: dict[frozenset, tuple[str, float]] = {}  # par -> (equipo, P(Yes))
     for mkt in payload:
@@ -123,9 +128,22 @@ def parse_polymarket(payload: list, fetched_at: str) -> list[OddsQuote]:
             prices = [float(p) for p in json.loads(mkt["outcomePrices"])]
         except (KeyError, ValueError, TypeError):
             continue
+        labels = [str(o).strip().lower() for o in outcomes]
+
+        # (3) Moneyline 1-X-2: 3 outcomes, uno de ellos es el empate.
+        if len(outcomes) == 3 and len(prices) == 3:
+            draw_idx = next((i for i, l in enumerate(labels) if l in DRAW_LABELS), None)
+            if draw_idx is None:
+                continue
+            hi, ai = [i for i in range(3) if i != draw_idx]
+            out.append(_quote("polymarket",
+                              normalize_es(outcomes[hi]), normalize_es(outcomes[ai]),
+                              price_to_decimal(prices[hi]), price_to_decimal(prices[ai]),
+                              price_to_decimal(prices[draw_idx]), fetched_at))
+            continue
+
         if len(outcomes) != 2 or len(prices) != 2:
             continue
-        labels = [str(o).strip().lower() for o in outcomes]
         if set(labels) == {"yes", "no"}:
             vs = _parse_versus(mkt.get("question", ""))
             if not vs:
@@ -149,6 +167,44 @@ def parse_polymarket(payload: list, fetched_at: str) -> list[OddsQuote]:
     return out
 
 
+def parse_polymarket_events(events: list, fetched_at: str) -> list[OddsQuote]:
+    """Parsea eventos de partido de Polymarket a una cuota por partido.
+
+    Cada evento tiene título "X vs. Y" y mercados Yes/No:
+    "Will X win on FECHA?", "Will Y win on FECHA?", "Will X vs. Y end in a draw?".
+    Se toma P(Yes) de cada uno: home/away = los win, draw = el de empate.
+    Devuelve un OddsQuote por evento con título emparejable (y ambos ganadores)."""
+    out: list[OddsQuote] = []
+    for ev in events:
+        vs = _parse_versus(ev.get("title", ""))
+        if not vs:
+            continue
+        raw_home, raw_away = vs[0].lower(), vs[1].lower()
+        p_home = p_away = p_draw = None
+        for mkt in (ev.get("markets") or []):
+            q = (mkt.get("question") or "").lower()
+            try:
+                labels = [str(o).strip().lower() for o in json.loads(mkt["outcomes"])]
+                prices = [float(p) for p in json.loads(mkt["outcomePrices"])]
+            except (KeyError, ValueError, TypeError):
+                continue
+            if set(labels) != {"yes", "no"}:
+                continue
+            p_yes = prices[labels.index("yes")]
+            if "draw" in q:                       # "…end in a draw?"
+                p_draw = p_yes
+            elif raw_home in q:                   # "Will X win on…"
+                p_home = p_yes
+            elif raw_away in q:                   # "Will Y win on…"
+                p_away = p_yes
+        if not (p_home and p_away):               # necesita ambos ganadores
+            continue
+        out.append(_quote("polymarket", normalize_es(vs[0]), normalize_es(vs[1]),
+                          price_to_decimal(p_home), price_to_decimal(p_away),
+                          price_to_decimal(p_draw) if p_draw else None, fetched_at))
+    return out
+
+
 def parse_codere(payload: dict, fetched_at: str) -> list[OddsQuote]:
     """payload normalizado: {events:[{home, away, odds:{home, draw, away}}]} decimal."""
     out: list[OddsQuote] = []
@@ -169,25 +225,52 @@ def parse_codere(payload: dict, fetched_at: str) -> list[OddsQuote]:
 # Fetchers de red (best-effort; selectores/endpoint a validar en vivo).
 # No se cubren con unit-tests: el parseo (arriba) sí.
 # ----------------------------------------------------------------------
-POLYMARKET_GAMMA = "https://gamma-api.polymarket.com/markets"
+POLYMARKET_GAMMA = "https://gamma-api.polymarket.com"
+WORLD_CUP_TAG_ID = 102232  # tag "FIFA World Cup 2026" en la Gamma API
 
 
-def fetch_polymarket(query: str = "World Cup", limit: int = 100) -> list:
-    """Consulta la Gamma API de Polymarket y devuelve la lista de mercados (cruda).
-    El filtrado/forma exacta puede requerir ajuste contra la API real."""
+def fetch_polymarket(tag_id: int = WORLD_CUP_TAG_ID, max_events: int = 500,
+                     query: str | None = None) -> list:
+    """Trae los eventos de un *tag* de Polymarket (default FIFA World Cup 2026 =
+    102232) **paginando** `/events` (limit máx 100 por página, vía `offset`) y
+    devuelve la lista de **eventos** (cada evento trae su título "X vs. Y" y un
+    array `markets` con los mercados Yes/No "Will X win…", "…end in a draw?").
+
+    La Gamma API **no tiene búsqueda de texto**: por eso filtramos por `tag_id`
+    (lo correcto para el Mundial) y, si se pasa, `query` filtra eventos por
+    substring en título/slug (client-side). El parseo a cuota por partido lo hace
+    `parse_polymarket_events`; el filtro fino por equipo, `select_markets` (regex)."""
     import urllib.parse
     import urllib.request
-    params = urllib.parse.urlencode({"active": "true", "closed": "false",
-                                     "limit": limit, "search": query})
-    url = f"{POLYMARKET_GAMMA}?{params}"
-    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-    try:
-        with urllib.request.urlopen(req, timeout=20) as r:
-            data = json.loads(r.read().decode("utf-8"))
-            return data if isinstance(data, list) else data.get("data", [])
-    except Exception as e:  # noqa: BLE001
-        print(f"[warn] polymarket fetch falló: {e}")
-        return []
+    page_size = 100  # máximo que admite la Gamma API por request
+    events: list = []
+    offset = 0
+    while len(events) < max_events:
+        params = urllib.parse.urlencode({
+            "tag_id": tag_id, "active": "true", "closed": "false",
+            "limit": min(page_size, max_events - len(events)), "offset": offset})
+        url = f"{POLYMARKET_GAMMA}/events?{params}"
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        try:
+            with urllib.request.urlopen(req, timeout=20) as r:
+                page = json.loads(r.read().decode("utf-8"))
+            if isinstance(page, dict):
+                page = page.get("data", [])
+        except Exception as e:  # noqa: BLE001
+            print(f"[warn] polymarket events fetch falló (offset {offset}): {e}")
+            break
+        if not page:
+            break
+        events.extend(page)
+        if len(page) < page_size:   # última página
+            break
+        offset += len(page)
+
+    if query:
+        q = query.lower()
+        events = [e for e in events
+                  if q in f'{e.get("title", "")} {e.get("slug", "")}'.lower()]
+    return events
 
 
 CODERE_URL = "https://www.codere.mx/apuestas-deportivas/deportes/futbol"
