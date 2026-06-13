@@ -19,6 +19,7 @@ from src.ingest import (get_or_create_tournament, seed_teams, ingest_calendar,
                         load_calendar, load_matches)
 from src.betting import BetParams, recommend_bet
 from src.strategies import load_active_strategy, strategy_to_params
+from src.odds_store import latest_odds
 from src.scraper import fetch_via_playwright, fetch_via_requests
 from ui_common import model_controls, betting_controls
 
@@ -55,6 +56,11 @@ use_filter = st.sidebar.checkbox("Filtrar por umbral de Bayes", value=False,
                                  key="live_use_filter")
 st.sidebar.caption(f"Sizing activo: **{sizing}**")
 
+st.sidebar.header("Cuotas")
+odds_source = st.sidebar.selectbox("Fuente de cuotas (en vivo)",
+                                   ["polymarket", "codere", "cuota fija"],
+                                   key="live_odds_source")
+
 st.sidebar.header("Scrape ESPN")
 date_range = st.sidebar.text_input("Rango de fechas", "20260611-20260710",
                                    key="live_date_range")
@@ -83,11 +89,15 @@ if run_scrape:
             n = ingest_calendar(s, t, results)
     st.success(f"{len(results)} partidos scrapeados, {n} nuevos guardados en la DB.")
 
-# 2) Leer calendario + finalizados de la DB
+# 2) Leer calendario + finalizados (+ cuotas de la fuente elegida) de la DB
+odds_map: dict = {}
 with Session(db_engine) as s:
     t = s.exec(select(Tournament).where(Tournament.name == "World Cup 2026")).first()
     calendar = load_calendar(s, t) if t else []
     finished = load_matches(s, t) if t else []
+    if t and odds_source != "cuota fija":
+        odds_map = {(o["home"], o["away"]): o
+                    for o in latest_odds(s, t, odds_source)}
 
 if not calendar:
     st.info("La DB no tiene calendario aún. Pulsa «Actualizar (scrape ESPN)» "
@@ -135,12 +145,15 @@ for date in sorted(by_date):
                 f"✅ **{m['home']} {m['home_goals']}-{m['away_goals']} {m['away']}** "
                 f"· {m['stage']}")
         else:
+            o = odds_map.get((m["home"], m["away"]))
+            mo = {"home": o["home_decimal"], "away": o["away_decimal"]} if o else None
             r = recommend_bet(pipe.prematch_rec(m["home"], m["away"]),
-                              float(common["bankroll0"]), params)
+                              float(common["bankroll0"]), params, match_odds=mo)
             if r["bet"]:
                 st.markdown(
                     f"🔵 {m['home']} vs {m['away']} · {m['stage']} → "
                     f"**Apostar: {r['pick']}**  ·  stake **{r['stake']:.0f}**  "
+                    f"@ cuota {r['odds']:.2f}  "
                     f"(p={r['p_pick']:.2f}, Bayes={r['bayes_pick']:.2f}, {sizing})")
             else:
                 motivo = "warm-up" if r["skip_warmup"] else "filtro Bayes"
@@ -154,11 +167,14 @@ rows = []
 for m in calendar:
     if m["status_finished"]:
         continue
+    o = odds_map.get((m["home"], m["away"]))
+    mo = {"home": o["home_decimal"], "away": o["away_decimal"]} if o else None
     r = recommend_bet(pipe.prematch_rec(m["home"], m["away"]),
-                      float(common["bankroll0"]), params)
+                      float(common["bankroll0"]), params, match_odds=mo)
     rows.append({"fecha": m["date"], "partido": f"{m['home']} vs {m['away']}",
                  "lado": r["pick"] if r["bet"] else "—",
-                 "stake": round(r["stake"], 2), "p_elo": round(r["p_pick"], 3),
+                 "stake": round(r["stake"], 2), "cuota": round(r["odds"], 2),
+                 "p_elo": round(r["p_pick"], 3),
                  "bayes": round(r["bayes_pick"], 3),
                  "apuesta": "sí" if r["bet"] else "no"})
 if rows:
