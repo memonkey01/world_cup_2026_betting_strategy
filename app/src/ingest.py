@@ -183,3 +183,13 @@ def persist_snapshots(session: Session, tournament: Tournament,
         n += 1
     session.commit()
     return n
+
+
+def clear_snapshots(session: Session, tournament: Tournament) -> int:
+    """Borra los RatingSnapshot del torneo. Devuelve cuántos borró."""
+    rows = session.exec(select(RatingSnapshot).where(
+        RatingSnapshot.tournament_id == tournament.id)).all()
+    for r in rows:
+        session.delete(r)
+    session.commit()
+    return len(rows)

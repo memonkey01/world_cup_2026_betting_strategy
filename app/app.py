@@ -21,7 +21,8 @@ from src.elo import EloSystem
 from src.fifa_seed import FIFA_SNAPSHOT_EXAMPLE
 from src.db import get_engine, init_db
 from src.models import Match, Tournament
-from src.ingest import ingest_qatar_backtest, load_matches
+from src.ingest import (ingest_qatar_backtest, load_matches, clear_snapshots,
+                        persist_snapshots)
 from ui_common import model_controls
 
 st.set_page_config(page_title="Backtest — Mundial Elo+Bayes", layout="wide")
@@ -102,6 +103,13 @@ pipe.bayes.seed_from_elo(pipe.initial_elo, strength=float(prior_strength))
 pipe.process_all(matches)
 
 lb = pd.DataFrame(pipe.combined_leaderboard())
+
+# Persistir la evolución (borra y reescribe los snapshots del torneo).
+with Session(db_engine) as s:
+    tq = s.exec(select(Tournament).where(Tournament.name == "Qatar 2022")).first()
+    if tq:
+        clear_snapshots(s, tq)
+        persist_snapshots(s, tq, pipe)
 
 # ----------------------------------------------------------------------
 # KPIs

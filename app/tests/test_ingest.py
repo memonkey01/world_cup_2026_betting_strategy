@@ -169,3 +169,21 @@ def test_ingest_calendar_updates_scheduled_to_finished():
     SAMPLE_CALENDAR["events"][1]["competitions"][0]["status"]["type"]["name"] = "STATUS_SCHEDULED"
     SAMPLE_CALENDAR["events"][1]["competitions"][0]["competitors"][0]["score"] = "0"
     SAMPLE_CALENDAR["events"][1]["competitions"][0]["competitors"][1]["score"] = "0"
+
+
+def test_clear_snapshots():
+    from src.pipeline import Pipeline
+    from src.ingest import clear_snapshots, persist_snapshots
+    from src.models import RatingSnapshot
+    s = make_session()
+    seed_teams(s, FIFA_SNAPSHOT_EXAMPLE)
+    t = get_or_create_tournament(s, "Qatar 2022", 2022, "backtest")
+    ingest_matches(s, t, fixture_to_results(QATAR_2022_SAMPLE), source="fixture")
+    pipe = Pipeline()
+    pipe.seed(FIFA_SNAPSHOT_EXAMPLE)
+    pipe.process_all(load_matches(s, t))
+    persist_snapshots(s, t, pipe)
+    assert len(s.exec(select(RatingSnapshot)).all()) > 0
+    removed = clear_snapshots(s, t)
+    assert removed > 0
+    assert s.exec(select(RatingSnapshot)).all() == []
