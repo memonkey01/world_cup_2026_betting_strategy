@@ -34,8 +34,8 @@ class Match(SQLModel, table=True):
     stage: str = "group"            # group | R16 | QF | SF | 3rd | final
     home_team_id: int = Field(foreign_key="team.id")
     away_team_id: int = Field(foreign_key="team.id")
-    home_goals: int
-    away_goals: int
+    home_goals: int | None = None   # None para partidos programados (sin marcador)
+    away_goals: int | None = None
     status: str = "STATUS_FULL_TIME"
     source: str = "fixture"         # 'espn' | 'fixture'
     espn_event_id: str | None = Field(default=None, index=True)

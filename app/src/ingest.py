@@ -91,13 +91,36 @@ def ingest_matches(session: Session, tournament: Tournament,
 
 
 def load_matches(session: Session, tournament: Tournament) -> list[tuple]:
-    """Devuelve tuplas (date, stage, home, away, hg, ag) ordenadas por fecha."""
+    """Tuplas (date, stage, home, away, hg, ag) de partidos FINALIZADOS, por fecha."""
+    from .models import FINISHED_STATUSES
     names = {t.id: t.name for t in session.exec(select(Team)).all()}
     rows = session.exec(select(Match).where(
-        Match.tournament_id == tournament.id)).all()
+        Match.tournament_id == tournament.id,
+        Match.status.in_(FINISHED_STATUSES))).all()
     out = [(m.date, m.stage, names[m.home_team_id], names[m.away_team_id],
             m.home_goals, m.away_goals) for m in rows]
     return sorted(out, key=lambda x: x[0])
+
+
+def load_calendar(session: Session, tournament: Tournament) -> list[dict]:
+    """Todos los partidos (calendario) ordenados por fecha, con status y goles."""
+    from .models import FINISHED_STATUSES
+    names = {t.id: t.name for t in session.exec(select(Team)).all()}
+    rows = session.exec(select(Match).where(
+        Match.tournament_id == tournament.id)).all()
+    out = [{
+        "date": m.date, "stage": m.stage,
+        "home": names[m.home_team_id], "away": names[m.away_team_id],
+        "home_goals": m.home_goals, "away_goals": m.away_goals,
+        "status": m.status, "status_finished": m.status in FINISHED_STATUSES,
+    } for m in rows]
+    return sorted(out, key=lambda r: r["date"])
+
+
+def ingest_calendar(session: Session, tournament: Tournament,
+                    results: list[MatchResult]) -> int:
+    """Persiste TODOS los partidos (finalizados + programados). Upsert por event_id."""
+    return ingest_matches(session, tournament, results, source="espn")
 
 
 # ---- orquestación de alto nivel ----

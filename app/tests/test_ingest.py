@@ -105,3 +105,67 @@ def test_persist_snapshots():
     rows = s.exec(select(RatingSnapshot)).all()
     assert n == len(rows) and n > 0
     assert any(r.bayes_lo is not None for r in rows)  # el paso final lleva intervalos
+
+
+SAMPLE_CALENDAR = {
+    "events": [
+        {
+            "id": "501", "date": "2026-06-11T18:00Z",
+            "competitions": [{
+                "status": {"type": {"name": "STATUS_FULL_TIME"}},
+                "notes": [{"headline": "Group A"}],
+                "competitors": [
+                    {"homeAway": "home", "score": "3", "team": {"displayName": "Mexico"}},
+                    {"homeAway": "away", "score": "0", "team": {"displayName": "Canada"}},
+                ],
+            }],
+        },
+        {
+            "id": "502", "date": "2026-06-12T18:00Z",
+            "competitions": [{
+                "status": {"type": {"name": "STATUS_SCHEDULED"}},
+                "notes": [{"headline": "Group A"}],
+                "competitors": [
+                    {"homeAway": "home", "score": "0", "team": {"displayName": "Argentina"}},
+                    {"homeAway": "away", "score": "0", "team": {"displayName": "Mexico"}},
+                ],
+            }],
+        },
+    ]
+}
+
+
+def test_ingest_calendar_persists_all_and_load_splits():
+    from src.ingest import ingest_calendar, load_calendar
+    s = make_session()
+    t = get_or_create_tournament(s, "World Cup 2026", 2026, "live")
+    results = parse_scoreboard_json(SAMPLE_CALENDAR)
+    ingest_calendar(s, t, results)
+
+    cal = load_calendar(s, t)                 # todos (2)
+    assert len(cal) == 2
+    assert {c["status_finished"] for c in cal} == {True, False}
+
+    finished = load_matches(s, t)             # solo finalizados (1)
+    assert len(finished) == 1
+    assert finished[0][2] == "Mexico" and finished[0][3] == "Canada"
+
+
+def test_ingest_calendar_updates_scheduled_to_finished():
+    from src.ingest import ingest_calendar, load_calendar
+    s = make_session()
+    t = get_or_create_tournament(s, "World Cup 2026", 2026, "live")
+    ingest_calendar(s, t, parse_scoreboard_json(SAMPLE_CALENDAR))
+    # el evento 502 (Argentina vs Mexico) ahora termina 2-1
+    SAMPLE_CALENDAR["events"][1]["competitions"][0]["status"]["type"]["name"] = "STATUS_FULL_TIME"
+    SAMPLE_CALENDAR["events"][1]["competitions"][0]["competitors"][0]["score"] = "2"
+    SAMPLE_CALENDAR["events"][1]["competitions"][0]["competitors"][1]["score"] = "1"
+    ingest_calendar(s, t, parse_scoreboard_json(SAMPLE_CALENDAR))
+
+    cal = load_calendar(s, t)
+    assert len(cal) == 2                       # sin duplicar (dedup event_id)
+    assert len(load_matches(s, t)) == 2        # ahora ambos finalizados
+    # restaurar el payload para no afectar otros tests
+    SAMPLE_CALENDAR["events"][1]["competitions"][0]["status"]["type"]["name"] = "STATUS_SCHEDULED"
+    SAMPLE_CALENDAR["events"][1]["competitions"][0]["competitors"][0]["score"] = "0"
+    SAMPLE_CALENDAR["events"][1]["competitions"][0]["competitors"][1]["score"] = "0"
