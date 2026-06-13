@@ -22,7 +22,7 @@ from src.betting import BetParams, recommend_bet
 from src.strategies import load_active_strategy, strategy_to_params
 from src.odds import (detect_source, fetch_polymarket, fetch_codere,
                       parse_polymarket_events, parse_codere, select_markets,
-                      OddsQuote)
+                      OddsQuote, CODERE_URL)
 from src.odds_store import latest_odds, ingest_odds
 from src.scraper import fetch_via_playwright, fetch_via_requests
 from ui_common import model_controls, betting_controls
@@ -272,9 +272,11 @@ with tab_odds:
                 n = ingest_odds(s, wc, quotes)
             st.success(f"{n} cuotas de Polymarket guardadas en la DB.")
 
-    # ---- Codere (de la URL pegada) ----
+    # ---- Codere (URL del Mundial 2026 por defecto) ----
     st.markdown("**Codere**")
-    url = st.text_input("URL de Codere", key="odds_url")
+    url = st.text_input("URL de Codere", value=CODERE_URL, key="odds_url",
+                        help="Por defecto, los partidos del Mundial 2026 en Codere. "
+                             "Pega otra URL de Codere si quieres otra competición.")
     src = detect_source(url) if url else None
     if url:
         st.caption(f"Fuente detectada: **{src or 'no reconocida'}**")

@@ -10,15 +10,40 @@ import re
 
 from .scraper import normalize_team
 
-# Nombres en español (Codere) -> canónico del proyecto.
+# Nombres en español (Codere) -> canónico del proyecto (= nombres del calendario
+# ESPN). Cubre las selecciones del Mundial 2026 vistas en Codere.
 ES_NAME_MAP = {
     "México": "Mexico", "Mexico": "Mexico",
     "Estados Unidos": "USA", "EE.UU.": "USA",
     "Canadá": "Canada", "Canada": "Canada",
-    "Corea del Sur": "Korea Republic",
+    "Corea del Sur": "Korea Republic", "Corea": "Korea Republic",
     "Inglaterra": "England", "Brasil": "Brazil", "Países Bajos": "Netherlands",
+    "Holanda": "Netherlands",
     "Croacia": "Croatia", "Bélgica": "Belgium", "Alemania": "Germany",
     "España": "Spain", "Francia": "France", "Marruecos": "Morocco",
+    # --- ampliación Mundial 2026 ---
+    "Catar": "Qatar", "Qatar": "Qatar",
+    "Suiza": "Switzerland", "Haití": "Haiti", "Escocia": "Scotland",
+    "Australia": "Australia", "Turquía": "Türkiye", "Turquia": "Türkiye",
+    "Curazao": "Curaçao", "Japón": "Japan", "Japon": "Japan",
+    "Costa de Marfil": "Ivory Coast", "Ecuador": "Ecuador",
+    "Suecia": "Sweden", "Túnez": "Tunisia", "Tunez": "Tunisia",
+    "Egipto": "Egypt", "Irán": "Iran", "Iran": "Iran",
+    "Nueva Zelanda": "New Zealand", "Nueva Zelandia": "New Zealand",
+    "Noruega": "Norway", "Irak": "Iraq", "Jordania": "Jordan",
+    "Sudáfrica": "South Africa", "Sudafrica": "South Africa",
+    "Chequia": "Czechia", "República Checa": "Czechia", "Republica Checa": "Czechia",
+    "Bosnia y Herzegovina": "Bosnia-Herzegovina",
+    "Bosnia-Herzegovina": "Bosnia-Herzegovina",
+    "Cabo Verde": "Cape Verde",
+    "Senegal": "Senegal", "Argelia": "Algeria", "Paraguay": "Paraguay",
+    "Colombia": "Colombia", "Uzbekistán": "Uzbekistan", "Uzbekistan": "Uzbekistan",
+    "Panamá": "Panama", "Uruguay": "Uruguay", "Portugal": "Portugal",
+    "Arabia Saudí": "Saudi Arabia", "Arabia Saudita": "Saudi Arabia",
+    "Ghana": "Ghana", "Túnez": "Tunisia",
+    "RD Congo": "Congo DR", "Congo RD": "Congo DR",
+    "República Democrática del Congo": "Congo DR", "R.D. Congo": "Congo DR",
+    "Rep. Dem. del Congo": "Congo DR", "Rep. Dem. Congo": "Congo DR",
 }
 
 
@@ -278,12 +303,18 @@ def fetch_polymarket(tag_id: int = WORLD_CUP_TAG_ID, max_events: int = 500,
     return events
 
 
-CODERE_URL = "https://www.codere.mx/apuestas-deportivas/deportes/futbol"
+CODERE_URL = "https://apuestas.codere.mx/es_MX/t/69679/Partidos-Mundial-2026"
 
 
 def fetch_codere(url: str = CODERE_URL) -> dict:
-    """Carga Codere con Playwright y extrae cuotas. Devuelve el payload normalizado
-    {events:[{home,away,odds:{home,draw,away}}]}. Los selectores son best-effort."""
+    """Carga Codere (Playwright) y extrae las cuotas 1-X-2 del cupón del Mundial.
+
+    Estructura real del DOM (validada): cada partido es un `tr.mkt` con tres
+    `td.seln` (local / empate / visitante); el nombre del equipo está en
+    `.seln-name` (el empate trae `.seln-draw-label`) y la cuota decimal en
+    `.price.dec`. Devuelve el payload normalizado
+    {events:[{home, away, odds:{home, draw, away}}]} con nombres en español
+    (los homologa luego `parse_codere` vía `normalize_es`)."""
     from playwright.sync_api import sync_playwright
     events: list[dict] = []
     with sync_playwright() as p:
@@ -294,26 +325,32 @@ def fetch_codere(url: str = CODERE_URL) -> dict:
                         "Chrome/120.0 Safari/537.36"))
         page = ctx.new_page()
         try:
-            page.goto(url, wait_until="domcontentloaded", timeout=30000)
-            page.wait_for_timeout(3000)
-            # best-effort: cada evento con dos equipos y 3 cuotas (1-X-2)
-            for ev in page.query_selector_all("[data-testid='event'], .event"):
-                names = ev.query_selector_all(
-                    "[data-testid='participant'], .participant-name")
-                odds = ev.query_selector_all(
-                    "[data-testid='odd'], .odd-value, .sportsbook-odds")
-                if len(names) >= 2 and len(odds) >= 3:
-                    def num(el):
-                        try:
-                            return float(el.inner_text().strip().replace(",", "."))
-                        except ValueError:
-                            return 0.0
-                    events.append({
-                        "home": names[0].inner_text().strip(),
-                        "away": names[1].inner_text().strip(),
-                        "odds": {"home": num(odds[0]), "draw": num(odds[1]),
-                                 "away": num(odds[2])},
-                    })
+            page.goto(url, wait_until="domcontentloaded", timeout=45000)
+            page.wait_for_selector("tr.mkt .price.dec", state="attached",
+                                   timeout=30000)
+            page.wait_for_timeout(2000)  # deja que rendericen todas las cuotas
+            events = page.evaluate(r"""() => {
+                const num = el => {
+                    if (!el) return null;
+                    const v = parseFloat(el.textContent.trim().replace(',', '.'));
+                    return Number.isFinite(v) ? v : null;
+                };
+                const out = [];
+                for (const row of document.querySelectorAll('tr.mkt')) {
+                    const selns = [...row.querySelectorAll('td.seln')];
+                    const named = selns.filter(s => s.querySelector('.seln-name'));
+                    if (named.length < 2) continue;
+                    const home = named[0], away = named[named.length - 1];
+                    const draw = selns.find(s => s.querySelector('.seln-draw-label'));
+                    const dec = s => num(s ? s.querySelector('.price.dec') : null);
+                    out.push({
+                        home: home.querySelector('.seln-name').textContent.trim(),
+                        away: away.querySelector('.seln-name').textContent.trim(),
+                        odds: {home: dec(home), away: dec(away), draw: dec(draw)},
+                    });
+                }
+                return out;
+            }""")
         except Exception as e:  # noqa: BLE001
             print(f"[warn] codere scrape falló: {e}")
         browser.close()

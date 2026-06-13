@@ -66,8 +66,12 @@ yield) es opcional y «Aplicar al panel» copia la combo elegida al sidebar. La
 página en vivo lee la activa (`load_active_strategy` + `strategy_to_params`) y
 recomienda 2026 con ella.
 
-**Cuotas reales:** `src/odds.py` (parsers puros + fetchers best-effort de
-Polymarket/Codere) → `Odds` (histórico) vía `odds_store`. La página en vivo pasa la
+**Cuotas reales:** `src/odds.py` (parsers puros + fetchers de Polymarket/Codere)
+→ `Odds` (histórico) vía `odds_store`. **Codere** scrapea por defecto el cupón
+del Mundial 2026 (`CODERE_URL = apuestas.codere.mx/es_MX/t/69679/...`); selectores
+reales validados: `tr.mkt` → `td.seln` (local/X/visitante) con `.seln-name` y
+`.price.dec`. Nombres en español homologados por `ES_NAME_MAP`+`normalize_es`
+(validado: 64/64 partidos casan con el calendario). La página en vivo pasa la
 cuota real por partido a `recommend_bet(..., match_odds=...)` según la fuente
 elegida (selector en la tab Cuotas, Polymarket por defecto). Selectores Codere /
 shape Polymarket: best-effort, validar en vivo. `parse_polymarket` soporta mercados
