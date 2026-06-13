@@ -6,8 +6,9 @@ y calibra las probabilidades del modelo contra resultados reales.
 
 Todo el código vive en [app/](app/) (paquete `src/`, entorno `uv`). Comentarios,
 docstrings y README están en español. La base de datos SQLite
-(`app/data/worldcup.db`) es la **fuente de verdad**: el scraper la llena con
-partidos y el pipeline Elo/Bayes lee de ella.
+(`app/data/worldcup.db`) es la **fuente de verdad**: guarda los partidos
+**finalizados y el calendario** (programados); el scraper la llena (upsert) y el
+pipeline Elo/Bayes lee de ella.
 
 ## Qué hace
 
@@ -33,28 +34,35 @@ partidos y el pipeline Elo/Bayes lee de ella.
 | [app/src/fifa_seed.py](app/src/fifa_seed.py) | `fifa_to_elo`, `load_fifa_ranking`, `FIFA_SNAPSHOT_EXAMPLE` |
 | [app/src/scraper.py](app/src/scraper.py) | ESPN scoreboard API vía Playwright; `fetch_via_requests` fallback; `normalize_team`/`normalize_stage` |
 | [app/src/qatar_fixture.py](app/src/qatar_fixture.py) | `QATAR_2022_SAMPLE` — resultados reales para backtest offline / fallback |
-| [app/src/pipeline.py](app/src/pipeline.py) | `Pipeline` — orquesta seed → Elo + Bayes por jornada, snapshots y calibración |
-| [app/src/models.py](app/src/models.py) | Modelos SQLModel: `Team`, `Tournament`, `Match`, `RatingSnapshot` |
+| [app/src/pipeline.py](app/src/pipeline.py) | `Pipeline` — orquesta seed → Elo + Bayes; `snapshots`, `match_log`, `team_evolution`, `prematch_rec` |
+| [app/src/models.py](app/src/models.py) | Modelos SQLModel: `Team`, `Tournament`, `Match` (goles nullable), `RatingSnapshot` |
 | [app/src/db.py](app/src/db.py) | Engine SQLite, `init_db`, sesiones (`:memory:` para tests) |
-| [app/src/ingest.py](app/src/ingest.py) | Pegamento scraper ↔ DB ↔ pipeline: `seed_teams`, `ingest_qatar_backtest`, `ingest_live`, `load_matches`, `persist_snapshots` |
-| [app/src/betting.py](app/src/betting.py) | Motor puro de backtest de apuestas: `BetParams`, `pick_side`, `stake_amount`, `simulate` |
-| [app/app.py](app/app.py) | Dashboard Streamlit (lee/escribe vía DB) |
-| [app/pages/](app/pages/) | Páginas Streamlit extra (multipage): simulador de apuestas |
+| [app/src/ingest.py](app/src/ingest.py) | scraper ↔ DB ↔ pipeline: `ingest_qatar_backtest`, `ingest_live`, `ingest_calendar`, `load_matches` (finalizados), `load_calendar` (todos), `persist_snapshots` |
+| [app/src/betting.py](app/src/betting.py) | Motor puro de apuestas: `BetParams`, `pick_side`, `stake_amount`, `simulate`, `recommend_bet` |
+| [app/ui_common.py](app/ui_common.py) | Controles de sidebar compartidos entre páginas (`model_controls`, `betting_controls`) |
+| [app/app.py](app/app.py) | 📊 Página **Backtest** (Qatar) — monitor Elo/Bayes |
+| [app/pages/1_🔴_Mundial_en_vivo.py](app/pages/) | 🔴 Página **en vivo**: scrape ESPN → DB (calendario) + recomendaciones por partido |
+| [app/pages/2_💰_Simulador_Apuestas.py](app/pages/) | 💰 Página **simulador** (backtest de apuestas) |
 | [app/tests/](app/tests/) | `test_pipeline.py`, `test_models.py`, `test_ingest.py`, `test_betting.py` |
 
-El simulador de apuestas consume `Pipeline.match_log` (foto pre-partido: prob
-Elo, medias Bayes y nº de partido por equipo) vía el motor puro `src/betting.py`.
+`app.py` es la página Backtest; `pages/` contiene Mundial en vivo y Simulador. Los
+parámetros se comparten entre páginas vía `session_state` (helpers en
+`ui_common.py`). El simulador consume `Pipeline.match_log` (foto pre-partido) y la
+página en vivo usa `Pipeline.prematch_rec` + `betting.recommend_bet` para
+recomendar lado + stake en cada partido programado del calendario.
 
 Flujo: `Pipeline.seed(fifa_points)` → `process_all(matches)` donde cada `match`
 es la tupla `(date, stage, home, away, home_goals, away_goals)`. Elo y Bayes se
 actualizan en paralelo; antes de cada partido se guarda `P(A gana)` para calibrar.
 
-## Modos del dashboard
+## Páginas (Streamlit multipage)
 
-- **Backtest Qatar 2022:** offline, usa `QATAR_2022_SAMPLE` (sin red).
-- **En vivo 2026:** scrapea `fifa.world` de ESPN por rango de fechas
-  (`YYYYMMDD-YYYYMMDD`) y procesa solo partidos finalizados. Botón
-  «Actualizar jornada» al cerrar cada fecha.
+- **📊 Backtest (`app.py`):** offline, siembra `QATAR_2022_SAMPLE` en la DB y
+  muestra el monitor Elo/Bayes (sin red).
+- **🔴 Mundial en vivo (`pages/1_…`):** scrapea `fifa.world` de ESPN por rango de
+  fechas (`YYYYMMDD-YYYYMMDD`), persiste **todo el calendario** (finalizados +
+  programados) y recomienda lado + stake en los programados.
+- **💰 Simulador (`pages/2_…`):** backtest de apuestas (dos estrategias).
 
 Endpoint ESPN (sin API key):
 `https://site.api.espn.com/apis/site/v2/sports/soccer/fifa.world/scoreboard?dates=YYYYMMDD-YYYYMMDD`

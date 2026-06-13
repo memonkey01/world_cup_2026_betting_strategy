@@ -38,25 +38,23 @@ uv run streamlit run app.py      # 2. abre el monitor en el navegador
 ```
 
 Streamlit imprime una URL local (por defecto http://localhost:8501) y la abre
-sola. Elige el modo en la barra lateral:
+sola. En la barra lateral hay tres páginas (ver «Páginas» abajo): **📊 Backtest**
+(la principal, *no necesita red*), **🔴 Mundial en vivo** y **💰 Simulador de
+apuestas**.
 
-- **Backtest Qatar 2022** (recomendado para empezar, *no necesita red*): al primer
-  arranque siembra la base de datos con resultados reales y muestra tabla, KPIs,
-  evolución de Elo y calibración.
-- **En vivo 2026** (necesita red y el navegador de Playwright): instala una sola
-  vez el navegador y luego scrapea ESPN:
+Para el modo en vivo (scrape de ESPN) instala una sola vez el navegador:
 
-  ```bash
-  uv run playwright install chromium    # solo una vez, solo para "En vivo 2026"
-  ```
+```bash
+uv run playwright install chromium    # solo para "Mundial en vivo"
+```
 
-  Pon el rango de fechas, pulsa «Actualizar jornada», y persiste los partidos
-  finalizados en la DB.
+En esa página pones el rango de fechas, pulsas «Actualizar (scrape ESPN)» y se
+guarda **todo el calendario** (finalizados + programados) en la DB.
 
 ### Tests
 
 ```bash
-uv run pytest -q                 # 18 tests, sin red
+uv run pytest -q                 # tests sin red
 ```
 
 ### Base de datos
@@ -99,20 +97,31 @@ src/pipeline.py       # orquestador Elo+Bayes + snapshots + match_log pre-partid
 src/models.py         # modelos SQLModel: Team, Tournament, Match, RatingSnapshot
 src/db.py             # engine SQLite, init_db, sesiones
 src/ingest.py         # pegamento scraper ↔ DB ↔ pipeline (DB = fuente de verdad)
-src/betting.py        # motor puro de backtest de apuestas (BetParams, simulate)
-app.py                # monitor Streamlit (lee/escribe vía DB)
-pages/2_💰_Simulador_Apuestas.py  # página Streamlit del simulador (multipage)
-data/worldcup.db      # SQLite (runtime, gitignored)
+src/betting.py        # motor puro de apuestas (BetParams, simulate, recommend_bet)
+ui_common.py          # controles de sidebar compartidos entre páginas (session_state)
+app.py                # 📊 Backtest (Qatar) — monitor Elo/Bayes
+pages/1_🔴_Mundial_en_vivo.py     # scrape ESPN → DB (calendario) + recomendaciones
+pages/2_💰_Simulador_Apuestas.py  # backtest de apuestas (2 estrategias)
+data/worldcup.db      # SQLite (runtime, gitignored) — finalizados + calendario
 tests/                # test_pipeline.py, test_models.py, test_ingest.py, test_betting.py
 ```
 
-## Simulador de apuestas
+## Páginas (multipage)
 
-Al correr `uv run streamlit run app.py`, la barra lateral muestra una segunda
-página, **💰 Simulador de apuestas**: backtest al ganador sobre Qatar 2022 con
-bet sizing dinámico (flat / proporcional a confianza / Kelly fraccional),
-arranque configurable de jornada, y una meta-estrategia con criterio de lado
-configurable (Elo / Bayes / mezcla). Compara dos estrategias —apostar a todos vs.
-solo cuando la media Bayes supera un umbral— con KPIs (ROI, yield, drawdown) y
-curvas de bankroll. Es un backtest educativo con cuotas sintéticas fijas, no
-consejo de apuestas.
+Al correr `uv run streamlit run app.py`, la barra lateral muestra tres páginas.
+Los parámetros (K, prior, cuota, criterio, umbral…) se **comparten entre páginas**
+vía `session_state` (helpers en `ui_common.py`), así backtest, vivo y simulador
+concuerdan.
+
+- **📊 Backtest (app.py):** monitor Elo/Bayes sobre Qatar 2022 — tabla, evolución
+  de Elo, distribución bayesiana, calibración y evolución combinada.
+- **🔴 Mundial en vivo:** scrapea ESPN, guarda **todo el calendario** (finalizados
+  + programados) en la DB, lo muestra como vista tipo calendario y recomienda
+  **lado + stake** por partido programado. El sizing se elige con botones
+  (Flat / Confianza / Kelly). Necesita red; sin calendario en la DB muestra un aviso.
+- **💰 Simulador de apuestas:** backtest al ganador sobre Qatar 2022 con bet sizing
+  dinámico y meta-estrategia configurable (criterio de lado Elo / Bayes / mezcla).
+  Compara *apostar a todos* vs *solo Bayes > umbral* con KPIs (ROI, yield, drawdown)
+  y curvas de bankroll.
+
+Backtest educativo con cuotas sintéticas fijas, no consejo de apuestas.
