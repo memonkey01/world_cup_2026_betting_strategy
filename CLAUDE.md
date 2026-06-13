@@ -39,11 +39,13 @@ pipeline Elo/Bayes lee de ella.
 | [app/src/db.py](app/src/db.py) | Engine SQLite, `init_db`, sesiones (`:memory:` para tests) |
 | [app/src/ingest.py](app/src/ingest.py) | scraper ↔ DB ↔ pipeline: `ingest_qatar_backtest`, `ingest_live`, `ingest_calendar`, `load_matches` (finalizados), `load_calendar` (todos), `persist_snapshots` |
 | [app/src/betting.py](app/src/betting.py) | Motor puro de apuestas: `BetParams`, `pick_side`, `stake_amount`, `simulate`, `recommend_bet` |
+| [app/src/dbview.py](app/src/dbview.py) | Inspección read-only de la DB: `table_schema`, `table_rows` |
 | [app/ui_common.py](app/ui_common.py) | Controles de sidebar compartidos entre páginas (`model_controls`, `betting_controls`) |
 | [app/app.py](app/app.py) | 📊 Página **Backtest** (Qatar) — monitor Elo/Bayes |
 | [app/pages/1_🔴_Mundial_en_vivo.py](app/pages/) | 🔴 Página **en vivo**: scrape ESPN → DB (calendario) + recomendaciones por partido |
 | [app/pages/2_💰_Simulador_Apuestas.py](app/pages/) | 💰 Página **simulador** (backtest de apuestas) |
-| [app/tests/](app/tests/) | `test_pipeline.py`, `test_models.py`, `test_ingest.py`, `test_betting.py` |
+| [app/pages/3_🗄️_Datos.py](app/pages/) | 🗄️ Página **explorador de datos** (esquema + filas por tabla, read-only) |
+| [app/tests/](app/tests/) | `test_pipeline.py`, `test_models.py`, `test_ingest.py`, `test_betting.py`, `test_dbview.py` |
 
 `app.py` es la página Backtest; `pages/` contiene Mundial en vivo y Simulador. Los
 parámetros se comparten entre páginas vía `session_state` (helpers en

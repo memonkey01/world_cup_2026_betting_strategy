@@ -98,12 +98,14 @@ src/models.py         # modelos SQLModel: Team, Tournament, Match, RatingSnapsho
 src/db.py             # engine SQLite, init_db, sesiones
 src/ingest.py         # pegamento scraper ↔ DB ↔ pipeline (DB = fuente de verdad)
 src/betting.py        # motor puro de apuestas (BetParams, simulate, recommend_bet)
+src/dbview.py         # inspección read-only de la DB (table_schema, table_rows)
 ui_common.py          # controles de sidebar compartidos entre páginas (session_state)
 app.py                # 📊 Backtest (Qatar) — monitor Elo/Bayes
 pages/1_🔴_Mundial_en_vivo.py     # scrape ESPN → DB (calendario) + recomendaciones
 pages/2_💰_Simulador_Apuestas.py  # backtest de apuestas (2 estrategias)
+pages/3_🗄️_Datos.py               # explorador de datos (esquema + filas por tabla)
 data/worldcup.db      # SQLite (runtime, gitignored) — finalizados + calendario
-tests/                # test_pipeline.py, test_models.py, test_ingest.py, test_betting.py
+tests/                # test_pipeline, test_models, test_ingest, test_betting, test_dbview
 ```
 
 ## Páginas (multipage)
@@ -123,5 +125,8 @@ concuerdan.
   dinámico y meta-estrategia configurable (criterio de lado Elo / Bayes / mezcla).
   Compara *apostar a todos* vs *solo Bayes > umbral* con KPIs (ROI, yield, drawdown)
   y curvas de bankroll.
+- **🗄️ Datos:** explorador read-only de la DB para validar los modelos — por tabla
+  (Teams / Tournaments / Matches / RatingSnapshots) muestra nº de filas, esquema y
+  datos, con filtro por torneo.
 
 Backtest educativo con cuotas sintéticas fijas, no consejo de apuestas.
