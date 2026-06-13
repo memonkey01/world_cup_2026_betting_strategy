@@ -99,6 +99,8 @@ src/db.py             # engine SQLite, init_db, sesiones
 src/ingest.py         # pegamento scraper ↔ DB ↔ pipeline (DB = fuente de verdad)
 src/betting.py        # motor puro de apuestas (BetParams, simulate, recommend_bet, sweep_strategies)
 src/strategies.py     # estrategia activa en la DB (save/load, Strategy<->BetParams)
+src/odds.py           # capa de cuotas (OddsQuote, parsers Polymarket/Codere, fetchers)
+src/odds_store.py     # persistencia de cuotas en la DB (Odds: histórico, última)
 src/dbview.py         # inspección read-only de la DB (table_schema, table_rows)
 ui_common.py          # controles de sidebar compartidos entre páginas (session_state)
 app.py                # 📊 Backtest (Qatar) — monitor Elo/Bayes
@@ -121,8 +123,13 @@ concuerdan.
 - **🔴 Mundial en vivo:** scrapea ESPN, guarda **todo el calendario** (finalizados
   + programados) en la DB, lo muestra como vista tipo calendario y recomienda
   **lado + stake** por partido programado usando la **estrategia activa** fijada en
-  el laboratorio (con fallback a los botones de sizing si no hay ninguna). Necesita
-  red; sin calendario en la DB muestra un aviso.
+  el laboratorio (con fallback a los botones de sizing si no hay ninguna), y la
+  **cuota real** por partido según la fuente elegida (Polymarket por defecto /
+  Codere / cuota fija). Necesita red; sin calendario en la DB muestra un aviso.
+
+> ⚠️ Los selectores de Codere y la forma de los mercados de Polymarket son
+> *best-effort* — pueden requerir ajuste contra la red real en el primer scrape.
+> El scraping de cuotas es para análisis personal, no redistribución.
 
 **Flujo:** Laboratorio (Qatar) → barrer y **fijar la mejor estrategia** → la página
 en vivo recomienda 2026 con esa estrategia activa.
@@ -130,7 +137,8 @@ en vivo recomienda 2026 con esa estrategia activa.
   con bet sizing dinámico y meta-estrategia configurable. Compara *apostar a todos*
   vs *solo Bayes > umbral*, y **barre las 18 combinaciones** (sizing × criterio ×
   filtro) rankeándolas por **yield**; permite **fijar la ganadora** como estrategia
-  activa en la DB.
+  activa en la DB. Incluye un panel **"Cuotas reales"** que scrapea Codere
+  (Playwright) + Polymarket (API) con caché 24h y las compara con la prob. del modelo.
 - **🗄️ Datos:** explorador read-only de la DB para validar los modelos — por tabla
   (Teams / Tournaments / Matches / RatingSnapshots) muestra nº de filas, esquema y
   datos, con filtro por torneo.

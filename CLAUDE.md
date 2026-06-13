@@ -35,11 +35,13 @@ pipeline Elo/Bayes lee de ella.
 | [app/src/scraper.py](app/src/scraper.py) | ESPN scoreboard API vía Playwright; `fetch_via_requests` fallback; `normalize_team`/`normalize_stage` |
 | [app/src/qatar_fixture.py](app/src/qatar_fixture.py) | `QATAR_2022_SAMPLE` — resultados reales para backtest offline / fallback |
 | [app/src/pipeline.py](app/src/pipeline.py) | `Pipeline` — orquesta seed → Elo + Bayes; `snapshots`, `match_log`, `team_evolution`, `prematch_rec` |
-| [app/src/models.py](app/src/models.py) | Modelos SQLModel: `Team`, `Tournament`, `Match` (goles nullable), `RatingSnapshot`, `Strategy` |
+| [app/src/models.py](app/src/models.py) | Modelos SQLModel: `Team`, `Tournament`, `Match` (goles nullable), `RatingSnapshot`, `Strategy`, `Odds` |
 | [app/src/db.py](app/src/db.py) | Engine SQLite, `init_db`, sesiones (`:memory:` para tests) |
 | [app/src/ingest.py](app/src/ingest.py) | scraper ↔ DB ↔ pipeline: `ingest_qatar_backtest`, `ingest_live`, `ingest_calendar`, `load_matches` (finalizados), `load_calendar` (todos), `persist_snapshots` |
 | [app/src/betting.py](app/src/betting.py) | Motor puro de apuestas: `BetParams`, `pick_side`, `stake_amount`, `simulate`, `recommend_bet`, `sweep_strategies` |
 | [app/src/strategies.py](app/src/strategies.py) | Estrategia activa en la DB: `save_active_strategy`, `load_active_strategy`, `strategy_to_params` |
+| [app/src/odds.py](app/src/odds.py) | Capa de cuotas: `OddsQuote`, conversores, `parse_polymarket`/`parse_codere` (puro) + `fetch_*` (red) |
+| [app/src/odds_store.py](app/src/odds_store.py) | Persistencia de cuotas: `ingest_odds`, `latest_odds`, `latest_scrape_iso` |
 | [app/src/dbview.py](app/src/dbview.py) | Inspección read-only de la DB: `table_schema`, `table_rows` |
 | [app/ui_common.py](app/ui_common.py) | Controles de sidebar compartidos entre páginas (`model_controls`, `betting_controls`) |
 | [app/app.py](app/app.py) | 📊 Página **Backtest** (Qatar) — monitor Elo/Bayes |
@@ -58,6 +60,12 @@ recomendar lado + stake en cada partido programado del calendario.
 (`sweep_strategies`, rankeadas por yield) y fija la ganadora en la DB (`Strategy`
 vía `save_active_strategy`); la página en vivo la lee (`load_active_strategy` +
 `strategy_to_params`) y recomienda 2026 con ella.
+
+**Cuotas reales:** `src/odds.py` (parsers puros + fetchers best-effort de
+Polymarket/Codere) → `Odds` (histórico) vía `odds_store`. El Simulador scrapea con
+caché 24h y compara con el modelo; la página en vivo pasa la cuota real por partido
+a `recommend_bet(..., match_odds=...)` según la fuente elegida (Polymarket por
+defecto). Selectores Codere / shape Polymarket: best-effort, validar en vivo.
 
 Flujo: `Pipeline.seed(fifa_points)` → `process_all(matches)` donde cada `match`
 es la tupla `(date, stage, home, away, home_goals, away_goals)`. Elo y Bayes se
